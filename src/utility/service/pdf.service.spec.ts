@@ -347,6 +347,27 @@ describe('PdfService', () => {
       expect(pdfText(buffer)).toContain('St. Example Church');
     });
 
+    it('asks Cloudinary for a small copy of the logo', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        currency: 'NGN',
+        logoUrl: 'https://res.cloudinary.com/demo/image/upload/v1/logo.png',
+      });
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => Buffer.from(TINY_PNG_BASE64, 'base64').buffer,
+      } as unknown as Response);
+
+      await service.generateSessionReport(baseSessionReport);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://res.cloudinary.com/demo/image/upload/c_limit,w_240,h_240/v1/logo.png',
+      );
+    });
+
     it('falls back to a text-only header when the logo fetch fails', async () => {
       mockCls.get.mockReturnValue('tenant-1');
       mockTenantRepo.findOneBy.mockResolvedValue({
@@ -424,6 +445,85 @@ describe('PdfService', () => {
         await service.generateAccountData({ ...data, milestones: [] }),
       );
       expect(text).toContain('No milestones yet.');
+    });
+  });
+
+  describe('generateFollowUpMonthlyReport', () => {
+    it('renders every section it has data for', async () => {
+      const buffer = await service.generateFollowUpMonthlyReport({
+        month: '2026-10',
+        from: '2026-10-01',
+        to: '2026-10-31',
+        totals: {
+          firstTimers: 75,
+          wantsToJoinChurch: 36,
+          wantsToJoinWorkforce: 17,
+        },
+        byDate: [{ date: '2026-10-11', count: 28 }],
+        strongestDay: { date: '2026-10-11', count: 28 },
+        services: [
+          {
+            date: '2026-10-11',
+            eventName: 'First Service',
+            count: 28,
+            attendedBy: ['Pastor A'],
+          },
+        ],
+        bySource: [{ source: 'WALK_IN', label: 'Walk-in', count: 75 }],
+        liked: [{ name: 'Ada', text: 'The warm welcome' }],
+        fields: [
+          {
+            id: 'w',
+            label: 'WhatsApp group',
+            type: 'YES_NO' as never,
+            answered: 60,
+            counts: [
+              { option: 'Yes', count: 52 },
+              { option: 'No', count: 8 },
+            ],
+          },
+          {
+            id: 'h',
+            label: 'How did you hear about us?',
+            type: 'CHOICE' as never,
+            answered: 75,
+            counts: [{ option: 'Friend', count: 27 }],
+          },
+          {
+            id: 'i',
+            label: 'What could we do better?',
+            type: 'LONG_TEXT' as never,
+            answered: 1,
+            quotes: [{ name: 'Lydia', text: 'Softer lighting' }],
+          },
+        ],
+        recap: {
+          month: '2026-09',
+          firstTimers: 121,
+          wantedToJoin: 70,
+          outcomes: [
+            {
+              outcome: 'STILL_ATTENDING' as never,
+              label: 'Still attending',
+              count: 34,
+            },
+          ],
+          unreachable: 29,
+          notYetReached: 7,
+        },
+      });
+      const text = pdfText(buffer);
+      for (const expected of [
+        'Follow-Up Monthly Report',
+        'October 2026',
+        'Last month: September 2026',
+        'Still attending',
+        'Pastor A',
+        'How did you hear about us?',
+        'The warm welcome',
+        'Softer lighting',
+      ])
+        expect(text).toContain(expected);
     });
   });
 });

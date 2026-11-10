@@ -51,6 +51,8 @@ import {
   FirstTimerConvertService,
   LinkedConvert,
 } from './first-timer-convert.service';
+import { FirstTimerCardService } from './first-timer-card.service';
+import { DateService } from '../../utility/service/date.service';
 
 export interface PublicEventOption {
   id: string;
@@ -141,6 +143,8 @@ export class FollowUpService {
     private readonly sundaySchoolAttendanceRepo: Repository<SundaySchoolAttendance>,
     private readonly departmentAccessService: DepartmentAccessService,
     private readonly firstTimerConvertService: FirstTimerConvertService,
+    private readonly cardService: FirstTimerCardService,
+    private readonly dateService: DateService,
   ) {
     this.followUpDueDays = this.configService.get<number>('FOLLOW_UP_DUE_DAYS');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -201,8 +205,9 @@ export class FollowUpService {
     dto: CreateFirstTimerDto,
   ): Promise<FirstTimer> {
     const created = await this.doCreateFirstTimer(
-      { ...dto, source: FirstTimerSourceEnum.APP_SIGNUP },
+      { ...dto, source: FirstTimerSourceEnum.APP_SIGNUP, visitedOn: undefined },
       {},
+      { selfService: true },
     );
     this.logger.log(
       `First-timer ${created.id} recorded via app signup self-onboarding`,
@@ -889,6 +894,14 @@ export class FollowUpService {
     );
   }
 
+  private visitDate(value?: string): string {
+    const today = this.dateService.today();
+    if (!value) return today;
+    if (value > today)
+      throw new BadRequestException("The visit date can't be in the future.");
+    return value;
+  }
+
   private computeDueDate(): Date {
     const due = new Date();
     due.setDate(due.getDate() + this.followUpDueDays);
@@ -913,7 +926,13 @@ export class FollowUpService {
   private async doCreateFirstTimer(
     dto: CreateFirstTimerDto,
     actor: { memberCreatorId?: string; adminCreatorId?: string },
+    { selfService = false }: { selfService?: boolean } = {},
   ): Promise<FirstTimer> {
+    // Staff typing in a paper card may leave gaps; only someone filling it in themselves must answer required fields.
+    const answers = await this.cardService.cleanAnswers(dto.answers, {
+      requireAll: selfService,
+    });
+    const visitedOn = this.visitDate(dto.visitedOn);
     let assignee: WorkerProfile | null = null;
     const dueDate = this.computeDueDate();
 
@@ -964,6 +983,8 @@ export class FollowUpService {
       enjoyedAboutChurch: dto.enjoyedAboutChurch ?? null,
       wantsToJoinWorkforce: dto.wantsToJoinWorkforce ?? false,
       notes: dto.notes ?? null,
+      answers,
+      visitedOn,
       visitedEvent: dto.visitedEventId ? { id: dto.visitedEventId } : null,
       createdByMember: actor.memberCreatorId
         ? { id: actor.memberCreatorId }
@@ -1095,6 +1116,21 @@ export class FollowUpService {
     if (dto.notes !== undefined) ft.notes = dto.notes;
     if (dto.visitedEventId !== undefined)
       ft.visitedEvent = { id: dto.visitedEventId } as Event;
+    if (dto.visitedOn !== undefined)
+      ft.visitedOn = this.visitDate(dto.visitedOn);
+    if (dto.answers !== undefined) {
+      const fields = await this.cardService.enabledFields();
+      const shown = new Set(fields.map((f) => f.id));
+      const kept = Object.fromEntries(
+        Object.entries(ft.answers ?? {}).filter(([id]) => !shown.has(id)),
+      );
+      ft.answers = {
+        ...kept,
+        ...(await this.cardService.cleanAnswers(dto.answers, {
+          requireAll: false,
+        })),
+      };
+    }
 
     await this.firstTimerRepo.save(ft);
     this.cacheService.flushNamespace('follow-up:report');

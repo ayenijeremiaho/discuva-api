@@ -16,8 +16,7 @@ const CACHE_TTL = 300;
 export const DEFAULT_ANNIVERSARY_SETTINGS: AnniversarySettings = {
   postEnabled: true,
   title: 'Celebrating {years} with {first_name}!',
-  message:
-    'Today marks {years} since {full_name} joined our church family. Join us in celebrating this milestone!',
+  body: 'Today marks {years} since {full_name} joined our church family. Join us in celebrating this milestone!',
 };
 
 export function renderAnniversaryText(
@@ -60,7 +59,7 @@ export class AnniversarySettingsService {
     const next: AnniversarySettings = {
       postEnabled: dto.postEnabled ?? current.postEnabled,
       title: dto.title?.trim() || current.title,
-      message: dto.message?.trim() || current.message,
+      body: dto.body?.trim() || current.body,
     };
     const row =
       (await this.settingRepo.findOne({ where: { key: STORAGE_KEY } })) ??

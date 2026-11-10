@@ -30,6 +30,13 @@ import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Event } from '../../event/entity/event.entity';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import { FirstTimerCardService } from './first-timer-card.service';
+import { DateService } from '../../utility/service/date.service';
+
+const mockCardService = {
+  cleanAnswers: jest.fn().mockResolvedValue({}),
+  enabledFields: jest.fn().mockResolvedValue([]),
+};
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -285,6 +292,8 @@ describe('FollowUpService', () => {
           provide: FirstTimerConvertService,
           useValue: mockFirstTimerConvertService,
         },
+        { provide: FirstTimerCardService, useValue: mockCardService },
+        { provide: DateService, useValue: { today: () => '2026-11-10' } },
       ],
     }).compile();
 
@@ -524,8 +533,33 @@ describe('FollowUpService', () => {
           source: FirstTimerSourceEnum.APP_SIGNUP,
           createdByMember: null,
           createdByAdmin: null,
+          visitedOn: '2026-11-10',
         }),
       );
+      expect(mockCardService.cleanAnswers).toHaveBeenCalledWith(undefined, {
+        requireAll: true,
+      });
+    });
+
+    it('ignores a visit date sent with a self sign-up', async () => {
+      let capturedCreateArgs: any;
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockManager.create.mockImplementation((entity: any, args: any) => {
+        if (entity === FirstTimer) capturedCreateArgs = args;
+        return args;
+      });
+      mockManager.save.mockImplementation((v: any) => Promise.resolve(v));
+
+      await service
+        .createFirstTimerFromAppSignup({
+          firstname: 'Ada',
+          lastname: 'Okoye',
+          phone: '+2348012345679',
+          visitedOn: '2026-01-01',
+        } as any)
+        .catch(() => undefined);
+
+      expect(capturedCreateArgs?.visitedOn).toBe('2026-11-10');
     });
   });
 
@@ -877,6 +911,38 @@ describe('FollowUpService', () => {
   // ── updateFirstTimer ─────────────────────────────────────────────────────
 
   describe('updateFirstTimer', () => {
+    it('refuses a visit date in the future', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce({
+        id: 'ft-1',
+        answers: {},
+      });
+      await expect(
+        service.updateFirstTimer('ft-1', { visitedOn: '2026-11-11' }),
+      ).rejects.toThrow("can't be in the future");
+    });
+
+    it('replaces answers to switched-on fields and keeps answers to switched-off ones', async () => {
+      const ft = { id: 'ft-1', answers: { on: 'old', off: 'kept' } };
+      mockFirstTimerRepo.findOne
+        .mockResolvedValueOnce(ft)
+        .mockResolvedValueOnce(ft);
+      mockFirstTimerRepo.save.mockResolvedValue(undefined);
+      mockCardService.enabledFields.mockResolvedValueOnce([{ id: 'on' }]);
+      mockCardService.cleanAnswers.mockResolvedValueOnce({ on: 'new' });
+
+      await service.updateFirstTimer('ft-1', {
+        answers: { on: 'new' },
+        visitedOn: '2026-10-04',
+      });
+
+      expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          answers: { off: 'kept', on: 'new' },
+          visitedOn: '2026-10-04',
+        }),
+      );
+    });
+
     it('throws NotFoundException when first-timer not found', async () => {
       mockFirstTimerRepo.findOne.mockResolvedValueOnce(null);
       await expect(

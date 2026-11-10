@@ -1,9 +1,11 @@
 import {
   IsBoolean,
   IsEmail,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -68,4 +70,13 @@ export class UpdateFirstTimerDto {
   @Transform(emptyToUndefined)
   @IsUUID()
   visitedEventId?: string;
+
+  // Replaces the answers to the card fields that are switched on; answers to switched-off fields are kept.
+  @IsOptional()
+  @IsObject()
+  answers?: Record<string, unknown>;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  visitedOn?: string;
 }

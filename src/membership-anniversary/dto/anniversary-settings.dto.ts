@@ -13,13 +13,13 @@ export class UpdateAnniversarySettingsDto {
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  message?: string;
+  body?: string;
 }
 
 export interface AnniversarySettings {
   postEnabled: boolean;
   title: string;
-  message: string;
+  body: string;
 }
 
 export interface AnniversaryCelebrant {

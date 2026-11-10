@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { jsPDF } from 'jspdf';
+import type { FollowUpMonthlyReport } from '../../follow-up/service/follow-up-monthly-report.service';
 import autoTable, { RowInput } from 'jspdf-autotable';
 import {
   FullEventReport,
@@ -202,11 +203,17 @@ export class PdfService {
     );
   }
 
+  // Images print at a few centimetres; a full-size upload made a two-page report several megabytes.
   private async fetchImage(
     url: string,
   ): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
     try {
-      const res = await fetch(url);
+      const res = await fetch(
+        url.replace(
+          /(res\.cloudinary\.com\/[^/]+\/image\/upload\/)(?!c_limit)/,
+          '$1c_limit,w_240,h_240/',
+        ),
+      );
       if (!res.ok) return null;
       const contentType = res.headers.get('content-type') ?? '';
       const format = contentType.includes('png')
@@ -270,7 +277,16 @@ export class PdfService {
     let gridX = 0;
     if (photo) {
       try {
-        doc.addImage(photo.dataUrl, photo.format, MARGIN, y, 24, 24);
+        doc.addImage(
+          photo.dataUrl,
+          photo.format,
+          MARGIN,
+          y,
+          24,
+          24,
+          undefined,
+          'FAST',
+        );
         gridX = 28;
       } catch {
         gridX = 0;
@@ -419,6 +435,8 @@ export class PdfService {
           24,
           22,
           22,
+          undefined,
+          'FAST',
         );
         y = 56;
       } catch {
@@ -574,6 +592,19 @@ export class PdfService {
       format: 'a4',
     });
     this.drawDepartmentGoalReport(doc, report, branding);
+    return Buffer.from(doc.output('arraybuffer'));
+  }
+
+  async generateFollowUpMonthlyReport(
+    report: FollowUpMonthlyReport,
+  ): Promise<Buffer> {
+    const branding = await this.resolveBranding();
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+    this.drawFollowUpMonthlyReport(doc, report, branding);
     return Buffer.from(doc.output('arraybuffer'));
   }
 
@@ -1803,6 +1834,8 @@ export class PdfService {
           3,
           16,
           16,
+          undefined,
+          'FAST',
         );
         textStartX = MARGIN + 20;
       } catch {
@@ -2191,5 +2224,195 @@ export class PdfService {
       bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
       alternateRowStyles: { fillColor: branding.theme.soft },
     });
+  }
+
+  private drawFollowUpMonthlyReport(
+    doc: jsPDF,
+    r: FollowUpMonthlyReport,
+    branding: PdfBranding,
+  ): void {
+    const monthName = (m: string) =>
+      new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+    const day = (d: string) =>
+      new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      });
+
+    const people = (n: number) => `${n} first-timer${n === 1 ? '' : 's'}`;
+    let y = this.drawPageHeader(doc, 'Follow-Up Monthly Report', branding);
+    y = this.drawAccentBand(
+      doc,
+      branding.theme,
+      y,
+      monthName(r.month),
+      r.strongestDay
+        ? `Busiest day: ${day(r.strongestDay.date)}, ${people(r.strongestDay.count)}`
+        : 'No first-timers recorded this month',
+      'First-timers',
+      String(r.totals.firstTimers),
+    );
+    y += 8;
+
+    const recap = r.recap;
+    y = this.drawAccountSectionTitle(
+      doc,
+      y,
+      `Last month: ${monthName(recap.month)}`,
+    );
+    if (!recap.wantedToJoin) {
+      y = this.drawAccountNote(
+        doc,
+        y,
+        `${people(recap.firstTimers)}; none asked to join.`,
+      );
+    } else {
+      y = this.drawAccountNote(
+        doc,
+        y,
+        `${people(recap.firstTimers)}; ${recap.wantedToJoin} wanted to join. Where those ${recap.wantedToJoin} are now:`,
+      );
+      y = this.drawCountTable(doc, y, branding, [
+        ...recap.outcomes.map((o): [string, number] => [o.label, o.count]),
+        ['Unreachable', recap.unreachable],
+        ['Not yet followed up', recap.notYetReached],
+      ]);
+    }
+
+    y = this.drawAccountSectionTitle(
+      doc,
+      y + 8,
+      `This month: ${monthName(r.month)}`,
+    );
+    const yesNo = r.fields.filter((f) => f.type === 'YES_NO');
+    y = this.drawCountTable(
+      doc,
+      y,
+      branding,
+      [
+        ['First-timers', r.totals.firstTimers],
+        [
+          applyWording('Want to join the church', branding.wording),
+          r.totals.wantsToJoinChurch,
+        ],
+        ['Want to join the workforce', r.totals.wantsToJoinWorkforce],
+        ...yesNo.map((f): [string, number] => [
+          f.label,
+          f.counts?.[0]?.count ?? 0,
+        ]),
+      ],
+      false,
+    );
+
+    if (r.services.length) {
+      y = this.drawAccountSectionTitle(doc, y + 8, 'By service');
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN },
+        head: [['Date', 'Service', 'First-timers', 'Attended to by']],
+        body: r.services.map((s) => [
+          day(s.date),
+          s.eventName ?? '—',
+          String(s.count),
+          s.attendedBy.join(', ') || '—',
+        ]),
+        columnStyles: { 2: { halign: 'right', cellWidth: 24 } },
+        headStyles: {
+          fillColor: branding.theme.accent,
+          textColor: DARK,
+          fontStyle: 'bold',
+          fontSize: 9,
+        },
+        bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: branding.theme.soft },
+      });
+      y = this.tableEnd(doc);
+    }
+
+    if (r.bySource.length) {
+      y = this.drawAccountSectionTitle(doc, y + 8, 'How they were recorded');
+      y = this.drawCountTable(
+        doc,
+        y,
+        branding,
+        r.bySource.map((s): [string, number] => [s.label, s.count]),
+      );
+    }
+
+    for (const f of r.fields.filter((f) => f.counts && f.type !== 'YES_NO')) {
+      y = this.drawAccountSectionTitle(doc, y + 8, f.label);
+      y = this.drawCountTable(
+        doc,
+        y,
+        branding,
+        f.counts!.map((c): [string, number] => [c.option, c.count]),
+      );
+    }
+
+    const quoteSections: [string, { name: string; text: string }[]][] = [
+      ['What they liked', r.liked],
+      ...r.fields
+        .filter((f) => f.quotes?.length)
+        .map((f): [string, { name: string; text: string }[]] => [
+          f.label,
+          f.quotes!,
+        ]),
+    ];
+    for (const [title, quotes] of quoteSections) {
+      if (!quotes.length) continue;
+      y = this.drawAccountSectionTitle(doc, y + 8, title);
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN },
+        body: quotes.map((q) => [q.text, q.name]),
+        columnStyles: { 1: { cellWidth: 32, textColor: MUTED } },
+        bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: branding.theme.soft },
+      });
+      y = this.tableEnd(doc);
+    }
+  }
+
+  // Label, count, and a bar scaled to the largest count (or to the first row when it's the total).
+  private drawCountTable(
+    doc: jsPDF,
+    y: number,
+    branding: PdfBranding,
+    rows: [string, number][],
+    bars = true,
+  ): number {
+    const max = Math.max(1, ...rows.map(([, n]) => n));
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      body: rows.map(([label, n]) => [label, String(n), '']),
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.45 },
+        1: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+      },
+      bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
+      alternateRowStyles: { fillColor: branding.theme.soft },
+      didDrawCell: (data) => {
+        if (!bars || data.section !== 'body' || data.column.index !== 2) return;
+        const n = rows[data.row.index][1];
+        const w = ((data.cell.width - 6) * n) / max;
+        if (w <= 0) return;
+        doc.setFillColor(branding.theme.brand);
+        doc.rect(
+          data.cell.x + 3,
+          data.cell.y + data.cell.height / 2 - 1.5,
+          w,
+          3,
+          'F',
+        );
+      },
+    });
+    return this.tableEnd(doc);
   }
 }

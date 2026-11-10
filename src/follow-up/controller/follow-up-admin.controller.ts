@@ -8,8 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { IsOptional, IsUUID } from 'class-validator';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -18,6 +20,16 @@ import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FollowUpService } from '../service/follow-up.service';
 import { DateService } from '../../utility/service/date.service';
+import { PdfService } from '../../utility/service/pdf.service';
+import { FirstTimerCardService } from '../service/first-timer-card.service';
+import { FollowUpMonthlyReportService } from '../service/follow-up-monthly-report.service';
+import {
+  CreateFirstTimerFieldDto,
+  ReorderFirstTimerFieldsDto,
+  UpdateFirstTimerFieldDto,
+} from '../dto/first-timer-field.dto';
+import { CurrentUser } from '../../auth/decorator/current-user.decorator';
+import { MemberAuth } from '../../auth/interface/auth.interface';
 import { FirstTimerConvertService } from '../service/first-timer-convert.service';
 import { LinkConvertDto } from '../dto/link-convert.dto';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
@@ -48,7 +60,76 @@ export class FollowUpAdminController {
     private readonly followUpService: FollowUpService,
     private readonly firstTimerConvertService: FirstTimerConvertService,
     private readonly dateService: DateService,
+    private readonly cardService: FirstTimerCardService,
+    private readonly monthlyReportService: FollowUpMonthlyReportService,
+    private readonly pdfService: PdfService,
   ) {}
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
+  @Get('card-fields')
+  getCardFields() {
+    return this.cardService.findAll();
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Post('card-fields')
+  createCardField(
+    @Body() dto: CreateFirstTimerFieldDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.cardService.create(dto, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Patch('card-fields/order')
+  reorderCardFields(
+    @Body() dto: ReorderFirstTimerFieldsDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.cardService.reorder(dto.ids, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Patch('card-fields/:id')
+  updateCardField(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFirstTimerFieldDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.cardService.update(id, dto, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Delete('card-fields/:id')
+  async deleteCardField(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    await this.cardService.remove(id, user.id);
+    return { deleted: true };
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
+  @Get('report/monthly')
+  getMonthlyReport(@Query('month') month: string) {
+    return this.monthlyReportService.getReport(month ?? '');
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
+  @Get('report/monthly.pdf')
+  async getMonthlyReportPdf(
+    @Query('month') month: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const report = await this.monthlyReportService.getReport(month ?? '');
+    const pdf = await this.pdfService.generateFollowUpMonthlyReport(report);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="follow-up-report-${report.month}.pdf"`,
+      'Content-Length': pdf.length,
+    });
+    res.end(pdf);
+  }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
   @Post('first-timers')

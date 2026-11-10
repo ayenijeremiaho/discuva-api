@@ -42,14 +42,14 @@ describe('AnniversarySettingsService', () => {
       {
         postEnabled: false,
         title: '  ',
-        message: 'Thank God for {first_name}',
+        body: 'Thank God for {first_name}',
       },
       'admin-1',
     );
     expect(saved).toEqual({
       postEnabled: false,
       title: DEFAULT_ANNIVERSARY_SETTINGS.title,
-      message: 'Thank God for {first_name}',
+      body: 'Thank God for {first_name}',
     });
     expect(repo.save).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'anniversary:post', value: saved }),

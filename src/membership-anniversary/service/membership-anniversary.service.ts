@@ -163,7 +163,7 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     if (settings.postEnabled) {
       await this.announcementService.createSystemAnnouncement(
         renderAnniversaryText(settings.title, member, years),
-        renderAnniversaryText(settings.message, member, years),
+        renderAnniversaryText(settings.body, member, years),
         undefined,
         this.dateService.endOfDay(),
       );

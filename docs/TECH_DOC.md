@@ -5097,7 +5097,7 @@ Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts cr
 
 **Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
 
-**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, message }`. Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
+**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, body }` (not `message`, which the response wrapper lifts out of `data`). Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
 
 **Admin routes:** `GET /anniversaries?days=` (members:read; 0–365, default 7) lists ACTIVE members whose anniversary is today (`daysAway: 0`) or within the window, soonest first, with `years` and `daysAway`; computed in one query from `age(today, date_joined_church)` (29 Feb joiners fall on 28 Feb in other years; a full scan of `members`, same as the birthday list). `GET /anniversaries/settings` (members:read), `PATCH /anniversaries/settings` (announcements:write).
 
@@ -5939,6 +5939,14 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 **No dedicated first-timer SMS route.** Texting first-timers is done by adding them to a Group (see Groups Module's phone-only entries, sourced "from First-Timers" over a date range) and sending via `POST /announcements/sms-broadcast` with `audience: GROUP` — this superseded a former one-off `POST /admin/follow-up/first-timers/sms` route, consolidating all SMS sending into the Announcements module.
 
 **Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached. Contacted means the task has a note, has moved past `PENDING`, or has an outcome, so an update saved without a note still counts.
+
+**First-timer card fields:** a church's own questions on the first-timer card, in tenant table `first_timer_fields` (`key` for the 14 ready-made fields seeded by tenant migration `1805875200000-AddFirstTimerCardFields`, all switched off; null for fields the church adds). Types (`FirstTimerFieldType`): `TEXT`, `LONG_TEXT`, `CHOICE`, `MULTI_CHOICE`, `YES_NO`, `DATE`, `DAY_MONTH` (stored `MM-DD`). Ready-made: WhatsApp group, here for a visit, sex, age range, marital status, birthday, address, nearest bus stop, occupation, Instagram, how they heard, what to do better, prayer request (not in the report by default), attended to by. Ready-made fields can be switched off but not deleted; up to 40 fields; a choice needs two or more options. Answers live on `first_timers.answers` (jsonb keyed by field id) and are checked by `FirstTimerCardService.cleanAnswers()` against the switched-on fields (unknown ids dropped, wrong shapes refused). Required fields are enforced only on self sign-up (`POST /follow-up/public/first-timer`); staff typing in a paper card can leave gaps. Editing a first-timer replaces answers to switched-on fields and keeps answers to switched-off ones. The switched-on list is cached 5 min under `follow-up:card-fields` and cleared on any change. Routes: `GET/POST /admin/follow-up/card-fields`, `PATCH /admin/follow-up/card-fields/order` (`{ ids }`), `PATCH/DELETE /admin/follow-up/card-fields/:id` (read/write `FOLLOW_UP_*`), and `GET /follow-up/public/card-fields` (switched-on fields only, used by the sign-up page and the worker form). Audit: `FIRST_TIMER_FIELD_CREATED/UPDATED/DELETED`, `FIRST_TIMER_FIELDS_REORDERED`.
+
+**Visit date:** `first_timers.visited_on` (date, church time, indexed). Staff can set `visitedOn` (YYYY-MM-DD, not in the future) when typing in a card later; self sign-up is always today. Existing rows were backfilled from `created_at` in the church timezone.
+
+**Monthly report:** `GET /admin/follow-up/report/monthly?month=YYYY-MM` and `GET /admin/follow-up/report/monthly.pdf?month=YYYY-MM` (`FOLLOW_UP_READ`), built by `FollowUpMonthlyReportService` from three queries: the month's first-timers by `visited_on` (one indexed range scan, capped at 3,000 rows, totals done in code), last month's first-timers grouped by their first-timer task's status and outcome, and the card fields. Returns `totals`, `byDate`, `strongestDay`, `services` (per visit date and service, with the distinct "attended to by" answers), `bySource`, `liked` (what they enjoyed, with first names, up to 100), `fields` (each in-report field with answers: counts for choice and yes/no, quotes for text), and `recap` (last month's first-timers who wanted to join, by outcome, plus unreachable and not yet followed up). Cached 5 min under the `follow-up:report` namespace. The PDF (`PdfService.generateFollowUpMonthlyReport`) uses the church's branding.
+
+**PDF images:** `PdfService.fetchImage` asks Cloudinary for a copy at most 240px (`c_limit,w_240,h_240`) and embeds with `FAST` compression; a full-size logo had made every branded PDF several megabytes.
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
 
@@ -9389,7 +9397,7 @@ department, so it stays meaningful regardless of what a given church calls the d
 
 ### FollowUpOutcomeEnum
 
-`JOINED` · `DECLINED` · `NO_ANSWER` · `PRAYED_WITH`
+`JOINED` · `DECLINED` · `NO_ANSWER` · `PRAYED_WITH` · `STILL_ATTENDING` · `TEMPORARILY_AWAY` · `RELOCATED` (the last three record where a first-timer stands a month on, for the monthly report's recap)
 
 ### ServiceProgrammeStatusEnum
 
@@ -10710,7 +10718,7 @@ A task assigned to a follow-up team worker to engage a first-timer or online non
 | member       | Member \| null          | ManyToOne, SET NULL on delete — set when type=ONLINE_NO_RESPONSE. Indexed.             |
 | event        | Event \| null           | ManyToOne, SET NULL on delete — event context. Indexed.                                |
 | assignedTo   | WorkerProfile           | ManyToOne, RESTRICT on delete — must be a FOLLOW_UP department worker                  |
-| outcome      | FollowUpOutcomeEnum \| null | JOINED \| DECLINED \| NO_ANSWER \| PRAYED_WITH                                     |
+| outcome      | FollowUpOutcomeEnum \| null | JOINED \| DECLINED \| NO_ANSWER \| PRAYED_WITH \| STILL_ATTENDING \| TEMPORARILY_AWAY \| RELOCATED |
 | outcomeNotes | text \| null            |                                                                                        |
 | dueDate        | date \| null            | Optional target date                                                                   |
 | notes          | FollowUpNote[]          | OneToMany                                                                              |
@@ -13425,7 +13433,7 @@ A task assigned to a follow-up team worker to engage a first-timer or online non
 | member       | Member \| null          | ManyToOne, SET NULL on delete — set when type=ONLINE_NO_RESPONSE. Indexed.             |
 | event        | Event \| null           | ManyToOne, SET NULL on delete — event context. Indexed.                                |
 | assignedTo   | WorkerProfile           | ManyToOne, RESTRICT on delete — must be a FOLLOW_UP department worker                  |
-| outcome      | FollowUpOutcomeEnum \| null | JOINED \| DECLINED \| NO_ANSWER \| PRAYED_WITH                                     |
+| outcome      | FollowUpOutcomeEnum \| null | JOINED \| DECLINED \| NO_ANSWER \| PRAYED_WITH \| STILL_ATTENDING \| TEMPORARILY_AWAY \| RELOCATED |
 | outcomeNotes | text \| null            |                                                                                        |
 | dueDate        | date \| null            | Optional target date                                                                   |
 | notes          | FollowUpNote[]          | OneToMany                                                                              |
@@ -19509,7 +19517,7 @@ Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts cr
 
 **Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
 
-**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, message }`. Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
+**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, body }` (not `message`, which the response wrapper lifts out of `data`). Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
 
 **Admin routes:** `GET /anniversaries?days=` (members:read; 0–365, default 7) lists ACTIVE members whose anniversary is today (`daysAway: 0`) or within the window, soonest first, with `years` and `daysAway`; computed in one query from `age(today, date_joined_church)` (29 Feb joiners fall on 28 Feb in other years; a full scan of `members`, same as the birthday list). `GET /anniversaries/settings` (members:read), `PATCH /anniversaries/settings` (announcements:write).
 
@@ -20353,6 +20361,14 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 **No dedicated first-timer SMS route.** Texting first-timers is done by adding them to a Group (see Groups Module's phone-only entries, sourced "from First-Timers" over a date range) and sending via `POST /announcements/sms-broadcast` with `audience: GROUP` — this superseded a former one-off `POST /admin/follow-up/first-timers/sms` route, consolidating all SMS sending into the Announcements module.
 
 **Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached. Contacted means the task has a note, has moved past `PENDING`, or has an outcome, so an update saved without a note still counts.
+
+**First-timer card fields:** a church's own questions on the first-timer card, in tenant table `first_timer_fields` (`key` for the 14 ready-made fields seeded by tenant migration `1805875200000-AddFirstTimerCardFields`, all switched off; null for fields the church adds). Types (`FirstTimerFieldType`): `TEXT`, `LONG_TEXT`, `CHOICE`, `MULTI_CHOICE`, `YES_NO`, `DATE`, `DAY_MONTH` (stored `MM-DD`). Ready-made: WhatsApp group, here for a visit, sex, age range, marital status, birthday, address, nearest bus stop, occupation, Instagram, how they heard, what to do better, prayer request (not in the report by default), attended to by. Ready-made fields can be switched off but not deleted; up to 40 fields; a choice needs two or more options. Answers live on `first_timers.answers` (jsonb keyed by field id) and are checked by `FirstTimerCardService.cleanAnswers()` against the switched-on fields (unknown ids dropped, wrong shapes refused). Required fields are enforced only on self sign-up (`POST /follow-up/public/first-timer`); staff typing in a paper card can leave gaps. Editing a first-timer replaces answers to switched-on fields and keeps answers to switched-off ones. The switched-on list is cached 5 min under `follow-up:card-fields` and cleared on any change. Routes: `GET/POST /admin/follow-up/card-fields`, `PATCH /admin/follow-up/card-fields/order` (`{ ids }`), `PATCH/DELETE /admin/follow-up/card-fields/:id` (read/write `FOLLOW_UP_*`), and `GET /follow-up/public/card-fields` (switched-on fields only, used by the sign-up page and the worker form). Audit: `FIRST_TIMER_FIELD_CREATED/UPDATED/DELETED`, `FIRST_TIMER_FIELDS_REORDERED`.
+
+**Visit date:** `first_timers.visited_on` (date, church time, indexed). Staff can set `visitedOn` (YYYY-MM-DD, not in the future) when typing in a card later; self sign-up is always today. Existing rows were backfilled from `created_at` in the church timezone.
+
+**Monthly report:** `GET /admin/follow-up/report/monthly?month=YYYY-MM` and `GET /admin/follow-up/report/monthly.pdf?month=YYYY-MM` (`FOLLOW_UP_READ`), built by `FollowUpMonthlyReportService` from three queries: the month's first-timers by `visited_on` (one indexed range scan, capped at 3,000 rows, totals done in code), last month's first-timers grouped by their first-timer task's status and outcome, and the card fields. Returns `totals`, `byDate`, `strongestDay`, `services` (per visit date and service, with the distinct "attended to by" answers), `bySource`, `liked` (what they enjoyed, with first names, up to 100), `fields` (each in-report field with answers: counts for choice and yes/no, quotes for text), and `recap` (last month's first-timers who wanted to join, by outcome, plus unreachable and not yet followed up). Cached 5 min under the `follow-up:report` namespace. The PDF (`PdfService.generateFollowUpMonthlyReport`) uses the church's branding.
+
+**PDF images:** `PdfService.fetchImage` asks Cloudinary for a copy at most 240px (`c_limit,w_240,h_240`) and embeds with `FAST` compression; a full-size logo had made every branded PDF several megabytes.
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
 
@@ -23489,7 +23505,7 @@ department, so it stays meaningful regardless of what a given church calls the d
 
 ### FollowUpOutcomeEnum
 
-`JOINED` · `DECLINED` · `NO_ANSWER` · `PRAYED_WITH`
+`JOINED` · `DECLINED` · `NO_ANSWER` · `PRAYED_WITH` · `STILL_ATTENDING` · `TEMPORARILY_AWAY` · `RELOCATED` (the last three record where a first-timer stands a month on, for the monthly report's recap)
 
 ### ServiceProgrammeStatusEnum
 

@@ -199,7 +199,7 @@ describe('MembershipAnniversaryService', () => {
       mockSettingsService.get.mockResolvedValueOnce({
         postEnabled: false,
         title: 'x',
-        message: 'y',
+        body: 'y',
       });
       const qb = makeQb();
       qb.getMany.mockResolvedValue([makeMember({ id: 'm1' })]);
