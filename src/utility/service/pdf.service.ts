@@ -2285,11 +2285,7 @@ export class PdfService {
       ]);
     }
 
-    y = this.drawAccountSectionTitle(
-      doc,
-      y + 8,
-      `This month: ${monthName(r.month)}`,
-    );
+    y = this.sectionStart(doc, y + 8, `This month: ${monthName(r.month)}`, 4);
     const yesNo = r.fields.filter((f) => f.type === 'YES_NO');
     y = this.drawCountTable(
       doc,
@@ -2311,7 +2307,7 @@ export class PdfService {
     );
 
     if (r.services.length) {
-      y = this.drawAccountSectionTitle(doc, y + 8, 'By service');
+      y = this.sectionStart(doc, y + 8, 'By service', r.services.length);
       autoTable(doc, {
         startY: y,
         margin: { left: MARGIN, right: MARGIN },
@@ -2336,7 +2332,12 @@ export class PdfService {
     }
 
     if (r.bySource.length) {
-      y = this.drawAccountSectionTitle(doc, y + 8, 'How they were recorded');
+      y = this.sectionStart(
+        doc,
+        y + 8,
+        'How they were recorded',
+        r.bySource.length,
+      );
       y = this.drawCountTable(
         doc,
         y,
@@ -2346,7 +2347,7 @@ export class PdfService {
     }
 
     for (const f of r.fields.filter((f) => f.counts && f.type !== 'YES_NO')) {
-      y = this.drawAccountSectionTitle(doc, y + 8, f.label);
+      y = this.sectionStart(doc, y + 8, f.label, f.counts!.length);
       y = this.drawCountTable(
         doc,
         y,
@@ -2366,7 +2367,7 @@ export class PdfService {
     ];
     for (const [title, quotes] of quoteSections) {
       if (!quotes.length) continue;
-      y = this.drawAccountSectionTitle(doc, y + 8, title);
+      y = this.sectionStart(doc, y + 8, title, quotes.length);
       autoTable(doc, {
         startY: y,
         margin: { left: MARGIN, right: MARGIN },
@@ -2377,6 +2378,36 @@ export class PdfService {
       });
       y = this.tableEnd(doc);
     }
+
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      doc
+        .setPage(i)
+        .setFont('helvetica', 'normal')
+        .setFontSize(7.5)
+        .setTextColor(MUTED)
+        .text(
+          `Follow-Up Monthly Report · ${monthName(r.month)} · Page ${i} of ${pages}`,
+          PAGE_W / 2,
+          290,
+          { align: 'center' },
+        );
+    }
+  }
+
+  // Starts a section on a new page when its title and first rows (or the whole of a short table) won't fit.
+  private sectionStart(
+    doc: jsPDF,
+    y: number,
+    title: string,
+    rows: number,
+  ): number {
+    const needed = 12 + (rows <= 8 ? rows : 3) * 7;
+    if (y + needed > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    return this.drawAccountSectionTitle(doc, y, title);
   }
 
   // Label, count, and a bar scaled to the largest count (or to the first row when it's the total).
