@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import {
+  DataSource,
+  In,
+  ObjectLiteral,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -625,7 +631,15 @@ export class FollowUpService {
   }
 
   private async fetchReport(from?: Date, to?: Date) {
-    const hasRange = from !== undefined && to !== undefined;
+    // Each bound applies on its own, so a range with only a start or only an end still filters.
+    const inRange = <Q extends SelectQueryBuilder<ObjectLiteral>>(
+      qb: Q,
+      column: string,
+    ): Q => {
+      if (from) qb.andWhere(`${column} >= :from`, { from });
+      if (to) qb.andWhere(`${column} <= :to`, { to });
+      return qb;
+    };
 
     const [
       firstTimerRows,
@@ -635,6 +649,7 @@ export class FollowUpService {
       overdueResult,
       workerRows,
       eventRows,
+      conversionRow,
     ] = await Promise.all([
       // Total first-timers + wants-to-join counts
       (() => {
@@ -650,8 +665,7 @@ export class FollowUpService {
             'wantsToJoinWorkforce',
           )
           .from('first_timers', 'ft');
-        if (hasRange)
-          qb.where('ft.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'ft.created_at');
         return qb.getRawOne<{
           total: string;
           wantsToJoinChurch: string;
@@ -667,8 +681,7 @@ export class FollowUpService {
           .addSelect('COUNT(*)', 'count')
           .from('first_timers', 'ft')
           .groupBy('ft.source');
-        if (hasRange)
-          qb.where('ft.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'ft.created_at');
         return qb.getRawMany<{ source: string; count: string }>();
       })(),
 
@@ -680,8 +693,7 @@ export class FollowUpService {
           .addSelect('COUNT(*)', 'count')
           .from('follow_up_tasks', 'task')
           .groupBy('task.status');
-        if (hasRange)
-          qb.where('task.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'task.created_at');
         return qb.getRawMany<{ status: string; count: string }>();
       })(),
 
@@ -694,8 +706,7 @@ export class FollowUpService {
           .from('follow_up_tasks', 'task')
           .where('task.outcome IS NOT NULL')
           .groupBy('task.outcome');
-        if (hasRange)
-          qb.andWhere('task.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'task.created_at');
         return qb.getRawMany<{ outcome: string; count: string }>();
       })(),
 
@@ -728,8 +739,7 @@ export class FollowUpService {
           .innerJoin('members', 'm', 'm.id = wp.member_id')
           .groupBy('m.id, m.firstname, m.lastname')
           .orderBy('assigned', 'DESC');
-        if (hasRange)
-          qb.where('task.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'task.created_at');
         return qb.getRawMany<{
           workerName: string;
           assigned: string;
@@ -748,9 +758,25 @@ export class FollowUpService {
           .innerJoin('events', 'e', 'e.id = ft.visited_event_id')
           .groupBy('e.id, e.name')
           .orderBy('"firstTimers"', 'DESC');
-        if (hasRange)
-          qb.where('ft.created_at BETWEEN :from AND :to', { from, to });
+        inRange(qb, 'ft.created_at');
         return qb.getRawMany<{ eventName: string; firstTimers: string }>();
+      })(),
+
+      // Conversion counts first-timer tasks only; online and manual tasks aren't people who could join
+      (() => {
+        const qb = this.txHost.tx
+          .createQueryBuilder()
+          .select('COUNT(*)', 'total')
+          .addSelect(
+            `COUNT(*) FILTER (WHERE task.outcome = '${FollowUpOutcomeEnum.JOINED}')`,
+            'joined',
+          )
+          .from('follow_up_tasks', 'task')
+          .where('task.type = :type', {
+            type: FollowUpTaskTypeEnum.FIRST_TIMER,
+          });
+        inRange(qb, 'task.created_at');
+        return qb.getRawOne<{ total: string; joined: string }>();
       })(),
     ]);
 
@@ -758,13 +784,11 @@ export class FollowUpService {
       (sum, r) => sum + Number(r.count),
       0,
     );
-    const joinedCount = Number(
-      outcomeRows.find((r) => r.outcome === FollowUpOutcomeEnum.JOINED)
-        ?.count ?? 0,
-    );
+    const firstTimerTasks = Number(conversionRow?.total ?? 0);
+    const joinedCount = Number(conversionRow?.joined ?? 0);
     const conversionRate =
-      totalTasks > 0
-        ? `${((joinedCount / totalTasks) * 100).toFixed(1)}%`
+      firstTimerTasks > 0
+        ? `${((joinedCount / firstTimerTasks) * 100).toFixed(1)}%`
         : '0%';
 
     const bySource: Record<string, number> = {};
@@ -1220,7 +1244,8 @@ export class FollowUpService {
          GROUP BY first_timer_id
        ) v ON v.first_timer_id = ft.id
        LEFT JOIN (
-         SELECT fut.first_timer_id, COUNT(fn.id) AS cnt
+         SELECT fut.first_timer_id,
+                COUNT(fn.id) + COUNT(*) FILTER (WHERE fut.status <> 'PENDING' OR fut.outcome IS NOT NULL) AS cnt
          FROM follow_up_tasks fut
          LEFT JOIN follow_up_notes fn ON fn.task_id = fut.id
          WHERE fut.first_timer_id IS NOT NULL

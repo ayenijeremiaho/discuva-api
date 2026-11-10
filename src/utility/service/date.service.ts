@@ -149,6 +149,14 @@ export class DateService {
     return fromZonedTime(parseISO(naiveDateTime), this.timezone);
   }
 
+  // A report filter bound: a bare YYYY-MM-DD covers that whole church-time day; anything else is taken as given.
+  rangeBound(value: string, edge: 'start' | 'end'): Date {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value);
+    return this.toChurchInstant(
+      `${value}T${edge === 'start' ? '00:00:00.000' : '23:59:59.999'}`,
+    );
+  }
+
   /**
    * Format a date using a pattern
    * @param date - The date to format

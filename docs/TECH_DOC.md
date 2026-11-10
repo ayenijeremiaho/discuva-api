@@ -5912,7 +5912,7 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Due date:** Tasks auto-set `dueDate = createdAt + FOLLOW_UP_DUE_DAYS` (default 3 days).
 
-**Pastoral report:** `GET /admin/follow-up/report?from=&to=` (requires `FOLLOW_UP_READ`) returns aggregate stats: first-timer totals, source breakdown, wants-to-join counts, task status/outcome breakdown, overdue snapshot, conversion rate, per-worker performance, and per-event first-timer counts. Date range is optional; omitting it returns all-time stats.
+**Pastoral report:** `GET /admin/follow-up/report?from=&to=` (requires `FOLLOW_UP_READ`) returns aggregate stats: first-timer totals, source breakdown, wants-to-join counts, task status/outcome breakdown, overdue snapshot, conversion rate, per-worker performance, and per-event first-timer counts. Date range is optional; omitting it returns all-time stats. `from` and `to` each apply on their own (one without the other still filters). A bare `YYYY-MM-DD` covers that whole day in the church timezone (`DateService.rangeBound`), so `to=2026-10-31` includes everything entered on the 31st; a full timestamp is used as given. The same applies to the pipeline and to `dateFrom`/`dateTo` on `GET /admin/follow-up/first-timers`. `conversionRate` is `JOINED` outcomes over `FIRST_TIMER` tasks created in the period; online and manual tasks are left out of it but still count in the status and outcome breakdowns.
 
 **Membership invitation:** `POST /admin/follow-up/first-timers/:id/invite-to-membership` (requires `FOLLOW_UP_WRITE`) queues a personalised invitation email to the first-timer. Returns `{ queued: true }` on success or `{ queued: false }` if the invitation was already sent (`inviteSentAt` is set). Throws `404` if the first-timer is not found or `400` if no email address is on record. Sets `FirstTimer.inviteSentAt` on first send to prevent duplicate emails.
 
@@ -5934,7 +5934,7 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **No dedicated first-timer SMS route.** Texting first-timers is done by adding them to a Group (see Groups Module's phone-only entries, sourced "from First-Timers" over a date range) and sending via `POST /announcements/sms-broadcast` with `audience: GROUP` — this superseded a former one-off `POST /admin/follow-up/first-timers/sms` route, consolidating all SMS sending into the Announcements module.
 
-**Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached.
+**Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached. Contacted means the task has a note, has moved past `PENDING`, or has an outcome, so an update saved without a note still counts.
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
 
@@ -20322,7 +20322,7 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Due date:** Tasks auto-set `dueDate = createdAt + FOLLOW_UP_DUE_DAYS` (default 3 days).
 
-**Pastoral report:** `GET /admin/follow-up/report?from=&to=` (requires `FOLLOW_UP_READ`) returns aggregate stats: first-timer totals, source breakdown, wants-to-join counts, task status/outcome breakdown, overdue snapshot, conversion rate, per-worker performance, and per-event first-timer counts. Date range is optional; omitting it returns all-time stats.
+**Pastoral report:** `GET /admin/follow-up/report?from=&to=` (requires `FOLLOW_UP_READ`) returns aggregate stats: first-timer totals, source breakdown, wants-to-join counts, task status/outcome breakdown, overdue snapshot, conversion rate, per-worker performance, and per-event first-timer counts. Date range is optional; omitting it returns all-time stats. `from` and `to` each apply on their own (one without the other still filters). A bare `YYYY-MM-DD` covers that whole day in the church timezone (`DateService.rangeBound`), so `to=2026-10-31` includes everything entered on the 31st; a full timestamp is used as given. The same applies to the pipeline and to `dateFrom`/`dateTo` on `GET /admin/follow-up/first-timers`. `conversionRate` is `JOINED` outcomes over `FIRST_TIMER` tasks created in the period; online and manual tasks are left out of it but still count in the status and outcome breakdowns.
 
 **Membership invitation:** `POST /admin/follow-up/first-timers/:id/invite-to-membership` (requires `FOLLOW_UP_WRITE`) queues a personalised invitation email to the first-timer. Returns `{ queued: true }` on success or `{ queued: false }` if the invitation was already sent (`inviteSentAt` is set). Throws `404` if the first-timer is not found or `400` if no email address is on record. Sets `FirstTimer.inviteSentAt` on first send to prevent duplicate emails.
 
@@ -20344,7 +20344,7 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **No dedicated first-timer SMS route.** Texting first-timers is done by adding them to a Group (see Groups Module's phone-only entries, sourced "from First-Timers" over a date range) and sending via `POST /announcements/sms-broadcast` with `audience: GROUP` — this superseded a former one-off `POST /admin/follow-up/first-timers/sms` route, consolidating all SMS sending into the Announcements module.
 
-**Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached.
+**Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached. Contacted means the task has a note, has moved past `PENDING`, or has an outcome, so an update saved without a note still counts.
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
 

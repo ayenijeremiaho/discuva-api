@@ -1089,30 +1089,40 @@ describe('FollowUpService', () => {
       expect(report.period.to).toBe(to.toISOString());
     });
 
-    it('computes conversionRate correctly', async () => {
-      qbMock.getRawOne.mockResolvedValue({
-        total: '0',
-        wantsToJoinChurch: '0',
-        wantsToJoinWorkforce: '0',
-        count: '0',
-      });
+    it('computes conversionRate from first-timer tasks only', async () => {
+      qbMock.getRawOne
+        .mockResolvedValueOnce({ total: '0' }) // firstTimerRows
+        .mockResolvedValueOnce({ count: '0' }) // overdue
+        .mockResolvedValueOnce({ total: '15', joined: '4' }); // first-timer tasks
       qbMock.getRawMany
         .mockResolvedValueOnce([]) // sourceRows
         .mockResolvedValueOnce([
-          // taskStatusRows
-          { status: 'COMPLETED', count: '10' },
-          { status: 'PENDING', count: '5' },
+          // taskStatusRows, all task types
+          { status: 'COMPLETED', count: '12' },
+          { status: 'PENDING', count: '8' },
         ])
-        .mockResolvedValueOnce([
-          // outcomeRows
-          { outcome: 'JOINED', count: '4' },
-        ])
-        .mockResolvedValueOnce([]) // workerRows
-        .mockResolvedValueOnce([]); // eventRows
+        .mockResolvedValueOnce([{ outcome: 'JOINED', count: '4' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
 
       const report = await service.getReport();
-      expect(report.tasks.total).toBe(15);
+      expect(report.tasks.total).toBe(20);
       expect(report.tasks.conversionRate).toBe('26.7%');
+      expect(qbMock.where).toHaveBeenCalledWith('task.type = :type', {
+        type: 'FIRST_TIMER',
+      });
+    });
+
+    it('filters by a start date alone instead of falling back to all time', async () => {
+      const from = new Date('2026-10-01T00:00:00Z');
+      await service.getReport(from, undefined);
+      expect(qbMock.andWhere).toHaveBeenCalledWith('ft.created_at >= :from', {
+        from,
+      });
+      expect(qbMock.andWhere).not.toHaveBeenCalledWith(
+        expect.stringContaining(':to'),
+        expect.anything(),
+      );
     });
 
     it('maps byWorker and byEvent rows to numbers', async () => {

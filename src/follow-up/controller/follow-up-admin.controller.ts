@@ -17,6 +17,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FollowUpService } from '../service/follow-up.service';
+import { DateService } from '../../utility/service/date.service';
 import { FirstTimerConvertService } from '../service/first-timer-convert.service';
 import { LinkConvertDto } from '../dto/link-convert.dto';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
@@ -46,6 +47,7 @@ export class FollowUpAdminController {
   constructor(
     private readonly followUpService: FollowUpService,
     private readonly firstTimerConvertService: FirstTimerConvertService,
+    private readonly dateService: DateService,
   ) {}
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
@@ -94,8 +96,8 @@ export class FollowUpAdminController {
       joinChurch,
       joinWorkforce,
       search,
-      dateFrom,
-      dateTo,
+      dateFrom && this.dateService.rangeBound(dateFrom, 'start').toISOString(),
+      dateTo && this.dateService.rangeBound(dateTo, 'end').toISOString(),
     );
   }
 
@@ -204,15 +206,18 @@ export class FollowUpAdminController {
   @Get('report')
   async getReport(@Query('from') from?: string, @Query('to') to?: string) {
     return this.followUpService.getReport(
-      from ? new Date(from) : undefined,
-      to ? new Date(to) : undefined,
+      from ? this.dateService.rangeBound(from, 'start') : undefined,
+      to ? this.dateService.rangeBound(to, 'end') : undefined,
     );
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
   @Get('first-timers/pipeline')
   async getPipeline(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.followUpService.getFirstTimerPipeline(from, to);
+    return this.followUpService.getFirstTimerPipeline(
+      from && this.dateService.rangeBound(from, 'start').toISOString(),
+      to && this.dateService.rangeBound(to, 'end').toISOString(),
+    );
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
