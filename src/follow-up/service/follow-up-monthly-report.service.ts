@@ -43,6 +43,7 @@ export interface Quote {
 
 export interface ReportField {
   id: string;
+  key: string | null;
   label: string;
   type: FirstTimerFieldType;
   answered: number;
@@ -70,6 +71,8 @@ export interface FollowUpMonthlyReport {
   bySource: { source: string; label: string; count: number }[];
   liked: Quote[];
   fields: ReportField[];
+  // Plain sentences for the top of the report: what went well, and what the team should look at.
+  highlights: { good: string[]; watch: string[] };
   recap: {
     month: string;
     firstTimers: number;
@@ -110,6 +113,86 @@ function monthBounds(month: string): { from: string; to: string } {
 function previousMonth(month: string): string {
   const [y, m] = month.split('-').map(Number);
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+const pct = (n: number, of: number) => Math.round((n / of) * 100);
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
+
+// Thresholds are deliberately simple; they point the team at what to discuss, not grade it.
+export function highlightsOf(
+  r: Omit<FollowUpMonthlyReport, 'highlights'>,
+): FollowUpMonthlyReport['highlights'] {
+  const good: string[] = [];
+  const watch: string[] = [];
+  const { totals, recap } = r;
+
+  if (recap.firstTimers > 0 && totals.firstTimers > 0) {
+    const change = pct(
+      totals.firstTimers - recap.firstTimers,
+      recap.firstTimers,
+    );
+    if (change >= 10)
+      good.push(`First-timers are up ${change}% on last month.`);
+    else if (change <= -10)
+      watch.push(
+        `First-timers are down ${-change}% on last month (${totals.firstTimers}, against ${recap.firstTimers}).`,
+      );
+  }
+
+  if (totals.firstTimers >= 5) {
+    const joining = pct(totals.wantsToJoinChurch, totals.firstTimers);
+    if (joining >= 40) good.push(`${joining}% of first-timers want to join.`);
+    else if (joining < 20)
+      watch.push(`Only ${joining}% of first-timers said they want to join.`);
+  }
+
+  if (r.strongestDay && r.byDate.length > 1)
+    good.push(
+      `The busiest day brought ${plural(r.strongestDay.count, 'first-timer')}.`,
+    );
+
+  const heard = r.fields.find((f) => f.key === 'heard_from');
+  const top = heard?.counts?.find((c) => c.count > 0 && c.option !== 'Other');
+  if (top)
+    good.push(
+      `"${top.option}" is how most first-timers heard about you (${top.count}).`,
+    );
+
+  if (recap.wantedToJoin > 0) {
+    const stayed = recap.outcomes
+      .filter(
+        (o) =>
+          o.outcome === FollowUpOutcomeEnum.STILL_ATTENDING ||
+          o.outcome === FollowUpOutcomeEnum.JOINED,
+      )
+      .reduce((sum, o) => sum + o.count, 0);
+    const stayedPct = pct(stayed, recap.wantedToJoin);
+    if (stayedPct >= 50)
+      good.push(
+        `${stayed} of last month's ${recap.wantedToJoin} who wanted to join are still with you (${stayedPct}%).`,
+      );
+    else if (stayed > 0)
+      watch.push(
+        `${stayed} of last month's ${recap.wantedToJoin} who wanted to join are still attending (${stayedPct}%).`,
+      );
+    if (pct(recap.unreachable, recap.wantedToJoin) >= 20)
+      watch.push(
+        `${recap.unreachable} of last month's first-timers couldn't be reached (${pct(recap.unreachable, recap.wantedToJoin)}%). Check that phone numbers are taken down clearly.`,
+      );
+    if (recap.notYetReached > 0)
+      watch.push(
+        `${plural(recap.notYetReached, 'person', 'people')} from last month still haven't been followed up.`,
+      );
+  }
+
+  const better = r.fields.find((f) => f.key === 'improve')?.quotes?.length ?? 0;
+  if (better)
+    watch.push(
+      `${plural(better, 'suggestion')} on what to do better. They're at the end of this report.`,
+    );
+
+  return { good, watch };
 }
 
 @Injectable()
@@ -203,7 +286,7 @@ export class FollowUpMonthlyReportService {
       null,
     );
 
-    return {
+    const report: Omit<FollowUpMonthlyReport, 'highlights'> = {
       month,
       from,
       to,
@@ -232,11 +315,13 @@ export class FollowUpMonthlyReportService {
         .filter((f) => f.answered > 0),
       recap: this.recap(recapMonth, recapRows),
     };
+    return { ...report, highlights: highlightsOf(report) };
   }
 
   private summarise(
     field: {
       id: string;
+      key: string | null;
       label: string;
       type: FirstTimerFieldType;
       options: string[];
@@ -250,6 +335,7 @@ export class FollowUpMonthlyReportService {
       );
     const base = {
       id: field.id,
+      key: field.key,
       label: field.label,
       type: field.type,
       answered: answers.length,

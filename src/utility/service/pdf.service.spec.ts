@@ -474,6 +474,7 @@ describe('PdfService', () => {
         fields: [
           {
             id: 'w',
+            key: 'whatsapp',
             label: 'WhatsApp group',
             type: 'YES_NO' as never,
             answered: 60,
@@ -484,6 +485,7 @@ describe('PdfService', () => {
           },
           {
             id: 'h',
+            key: 'heard_from',
             label: 'How did you hear about us?',
             type: 'CHOICE' as never,
             answered: 75,
@@ -491,12 +493,17 @@ describe('PdfService', () => {
           },
           {
             id: 'i',
+            key: 'improve',
             label: 'What could we do better?',
             type: 'LONG_TEXT' as never,
             answered: 1,
             quotes: [{ name: 'Lydia', text: 'Softer lighting' }],
           },
         ],
+        highlights: {
+          good: ['48% of first-timers want to join.'],
+          watch: ["29 of last month's first-timers couldn't be reached."],
+        },
         recap: {
           month: '2026-09',
           firstTimers: 121,
@@ -516,7 +523,10 @@ describe('PdfService', () => {
       for (const expected of [
         'Follow-Up Monthly Report',
         'October 2026',
-        'Last month: September 2026',
+        'Going well',
+        '48% of first-timers want to join.',
+        'Needs attention',
+        "Last month's first-timers: September 2026",
         'Still attending',
         'Pastor A',
         'How did you hear about us?',

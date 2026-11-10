@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { FollowUpMonthlyReportService } from './follow-up-monthly-report.service';
+import {
+  FollowUpMonthlyReportService,
+  highlightsOf,
+} from './follow-up-monthly-report.service';
 import { FirstTimerFieldType } from '../enums/follow-up.enum';
 
 const fields = [
@@ -180,5 +183,101 @@ describe('FollowUpMonthlyReportService', () => {
     const r = await service.getReport('2027-01');
     expect(r.recap.month).toBe('2026-12');
     expect(r.strongestDay).toBeNull();
+  });
+
+  describe('highlightsOf', () => {
+    const base = {
+      month: '2026-10',
+      from: '2026-10-01',
+      to: '2026-10-31',
+      totals: {
+        firstTimers: 75,
+        wantsToJoinChurch: 36,
+        wantsToJoinWorkforce: 17,
+      },
+      byDate: [
+        { date: '2026-10-04', count: 15 },
+        { date: '2026-10-11', count: 28 },
+      ],
+      strongestDay: { date: '2026-10-11', count: 28 },
+      services: [],
+      bySource: [],
+      liked: [],
+      fields: [
+        {
+          id: 'h',
+          key: 'heard_from',
+          label: 'Heard',
+          type: FirstTimerFieldType.CHOICE,
+          answered: 75,
+          counts: [
+            { option: 'Other', count: 30 },
+            { option: 'Friend', count: 27 },
+          ],
+        },
+        {
+          id: 'i',
+          key: 'improve',
+          label: 'Better',
+          type: FirstTimerFieldType.LONG_TEXT,
+          answered: 1,
+          quotes: [{ name: 'A', text: 'Time management' }],
+        },
+      ],
+      recap: {
+        month: '2026-09',
+        firstTimers: 121,
+        wantedToJoin: 70,
+        outcomes: [
+          { outcome: 'STILL_ATTENDING', label: 'Still attending', count: 34 },
+        ],
+        unreachable: 29,
+        notYetReached: 2,
+      },
+    } as never;
+
+    it('praises what is going well and flags what needs attention', () => {
+      const { good, watch } = highlightsOf(base);
+      expect(good).toEqual(
+        expect.arrayContaining([
+          '48% of first-timers want to join.',
+          '"Friend" is how most first-timers heard about you (27).',
+        ]),
+      );
+      expect(watch).toEqual(
+        expect.arrayContaining([
+          'First-timers are down 38% on last month (75, against 121).',
+          expect.stringContaining(
+            "29 of last month's first-timers couldn't be reached (41%)",
+          ),
+          "2 people from last month still haven't been followed up.",
+          "1 suggestion on what to do better. They're at the end of this report.",
+        ]),
+      );
+    });
+
+    it('says nothing about a month with too little to go on', () => {
+      expect(
+        highlightsOf({
+          ...(base as object),
+          totals: {
+            firstTimers: 2,
+            wantsToJoinChurch: 0,
+            wantsToJoinWorkforce: 0,
+          },
+          byDate: [],
+          strongestDay: null,
+          fields: [],
+          recap: {
+            month: '2026-09',
+            firstTimers: 0,
+            wantedToJoin: 0,
+            outcomes: [],
+            unreachable: 0,
+            notYetReached: 0,
+          },
+        } as never),
+      ).toEqual({ good: [], watch: [] });
+    });
   });
 });

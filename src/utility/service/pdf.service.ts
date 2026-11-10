@@ -122,6 +122,15 @@ const MUTED = '#8A817C';
 const DANGER = '#C0392B';
 const SUCCESS = '#2E7D32';
 const WHITE = '#FFFFFF';
+const WATCH = '#B26A00';
+
+type StatTone = 'good' | 'watch' | 'bad' | undefined;
+// Fixed meaning colours, the same on every church theme: green going well, amber to watch, red to act on.
+const TONES: Record<'good' | 'watch' | 'bad', { ink: string; fill: string }> = {
+  good: { ink: '#2E7D32', fill: '#EAF5EC' },
+  watch: { ink: WATCH, fill: '#FFF4E3' },
+  bad: { ink: '#B42318', fill: '#FDECEA' },
+};
 
 const PAGE_W = 210;
 const MARGIN = 18;
@@ -2231,83 +2240,138 @@ export class PdfService {
     r: FollowUpMonthlyReport,
     branding: PdfBranding,
   ): void {
+    const theme = branding.theme;
     const monthName = (m: string) =>
       new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-GB', {
         month: 'long',
         year: 'numeric',
         timeZone: 'UTC',
       });
-    const day = (d: string) =>
+    const day = (d: string, weekday = true) =>
       new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', {
-        weekday: 'short',
+        ...(weekday && { weekday: 'short' }),
         day: 'numeric',
         month: 'short',
         timeZone: 'UTC',
       });
+    const pctOf = (n: number, of: number) =>
+      of ? `${Math.round((n / of) * 100)}%` : '—';
 
-    const people = (n: number) => `${n} first-timer${n === 1 ? '' : 's'}`;
-    let y = this.drawPageHeader(doc, 'Follow-Up Monthly Report', branding);
-    y = this.drawAccentBand(
+    let y = this.drawReportCover(
       doc,
-      branding.theme,
-      y,
+      branding,
+      'Follow-Up Monthly Report',
       monthName(r.month),
-      r.strongestDay
-        ? `Busiest day: ${day(r.strongestDay.date)}, ${people(r.strongestDay.count)}`
-        : 'No first-timers recorded this month',
-      'First-timers',
-      String(r.totals.firstTimers),
     );
-    y += 8;
+
+    const t = r.totals;
+    const change = r.recap.firstTimers
+      ? Math.round(
+          ((t.firstTimers - r.recap.firstTimers) / r.recap.firstTimers) * 100,
+        )
+      : null;
+    y = this.drawStatCards(doc, y, theme, [
+      {
+        value: String(t.firstTimers),
+        label: 'First-timers',
+        note:
+          change === null
+            ? undefined
+            : `${change >= 0 ? '+' : ''}${change}% on ${monthName(r.recap.month).split(' ')[0]}`,
+        tone: change === null ? undefined : change >= 0 ? 'good' : 'watch',
+      },
+      {
+        value: String(t.wantsToJoinChurch),
+        label: applyWording('Want to join the church', branding.wording),
+        note: `${pctOf(t.wantsToJoinChurch, t.firstTimers)} of first-timers`,
+      },
+      {
+        value: String(t.wantsToJoinWorkforce),
+        label: 'Want to join the workforce',
+        note: `${pctOf(t.wantsToJoinWorkforce, t.firstTimers)} of first-timers`,
+      },
+      r.strongestDay
+        ? {
+            value: String(r.strongestDay.count),
+            label: 'Busiest day',
+            note: day(r.strongestDay.date),
+          }
+        : { value: '—', label: 'Busiest day' },
+    ]);
+
+    y = this.drawHighlightBoxes(doc, y + 6, r.highlights);
 
     const recap = r.recap;
-    y = this.drawAccountSectionTitle(
+    y = this.sectionStart(
       doc,
-      y,
-      `Last month: ${monthName(recap.month)}`,
+      y + 10,
+      `Last month's first-timers: ${monthName(recap.month)}`,
+      4,
     );
     if (!recap.wantedToJoin) {
       y = this.drawAccountNote(
         doc,
         y,
-        `${people(recap.firstTimers)}; none asked to join.`,
+        `${recap.firstTimers} first-timers; none asked to join.`,
       );
     } else {
       y = this.drawAccountNote(
         doc,
         y,
-        `${people(recap.firstTimers)}; ${recap.wantedToJoin} wanted to join. Where those ${recap.wantedToJoin} are now:`,
+        `${recap.firstTimers} first-timers, ${recap.wantedToJoin} of whom wanted to join. Where those ${recap.wantedToJoin} are now:`,
       );
-      y = this.drawCountTable(doc, y, branding, [
-        ...recap.outcomes.map((o): [string, number] => [o.label, o.count]),
-        ['Unreachable', recap.unreachable],
-        ['Not yet followed up', recap.notYetReached],
+      const toneOf = (o: string): StatTone =>
+        o === 'STILL_ATTENDING' || o === 'JOINED'
+          ? 'good'
+          : o === 'TEMPORARILY_AWAY' || o === 'NO_ANSWER'
+            ? 'watch'
+            : o === 'DECLINED'
+              ? 'bad'
+              : undefined;
+      y = this.drawStatCards(doc, y + 1, theme, [
+        ...recap.outcomes.map((o) => ({
+          value: String(o.count),
+          label: o.label,
+          note: pctOf(o.count, recap.wantedToJoin),
+          tone: toneOf(o.outcome),
+        })),
+        ...(recap.unreachable
+          ? [
+              {
+                value: String(recap.unreachable),
+                label: 'Unreachable',
+                note: pctOf(recap.unreachable, recap.wantedToJoin),
+                tone: 'bad' as StatTone,
+              },
+            ]
+          : []),
+        ...(recap.notYetReached
+          ? [
+              {
+                value: String(recap.notYetReached),
+                label: 'Not yet followed up',
+                note: pctOf(recap.notYetReached, recap.wantedToJoin),
+                tone: 'bad' as StatTone,
+              },
+            ]
+          : []),
       ]);
     }
 
-    y = this.sectionStart(doc, y + 8, `This month: ${monthName(r.month)}`, 4);
-    const yesNo = r.fields.filter((f) => f.type === 'YES_NO');
-    y = this.drawCountTable(
-      doc,
-      y,
-      branding,
-      [
-        ['First-timers', r.totals.firstTimers],
-        [
-          applyWording('Want to join the church', branding.wording),
-          r.totals.wantsToJoinChurch,
-        ],
-        ['Want to join the workforce', r.totals.wantsToJoinWorkforce],
-        ...yesNo.map((f): [string, number] => [
-          f.label,
-          f.counts?.[0]?.count ?? 0,
-        ]),
-      ],
-      false,
-    );
+    if (r.byDate.length) {
+      y = this.sectionStart(doc, y + 10, 'First-timers by day', 8);
+      y = this.drawDayChart(
+        doc,
+        y + 2,
+        theme,
+        r.byDate,
+        r.strongestDay?.date,
+        (d) => day(d, false),
+      );
+    }
 
     if (r.services.length) {
-      y = this.sectionStart(doc, y + 8, 'By service', r.services.length);
+      y = this.sectionStart(doc, y + 10, 'By service', r.services.length);
       autoTable(doc, {
         startY: y,
         margin: { left: MARGIN, right: MARGIN },
@@ -2318,65 +2382,68 @@ export class PdfService {
           String(s.count),
           s.attendedBy.join(', ') || '—',
         ]),
-        columnStyles: { 2: { halign: 'right', cellWidth: 24 } },
+        columnStyles: {
+          2: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
+        },
         headStyles: {
-          fillColor: branding.theme.accent,
-          textColor: DARK,
+          fillColor: theme.brand,
+          textColor: WHITE,
           fontStyle: 'bold',
-          fontSize: 9,
+          fontSize: 8.5,
         },
         bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
-        alternateRowStyles: { fillColor: branding.theme.soft },
+        alternateRowStyles: { fillColor: theme.tint },
       });
       y = this.tableEnd(doc);
     }
 
-    if (r.bySource.length) {
-      y = this.sectionStart(
-        doc,
-        y + 8,
-        'How they were recorded',
-        r.bySource.length,
-      );
-      y = this.drawCountTable(
-        doc,
-        y,
-        branding,
-        r.bySource.map((s): [string, number] => [s.label, s.count]),
-      );
-    }
-
-    for (const f of r.fields.filter((f) => f.counts && f.type !== 'YES_NO')) {
-      y = this.sectionStart(doc, y + 8, f.label, f.counts!.length);
-      y = this.drawCountTable(
-        doc,
-        y,
-        branding,
-        f.counts!.map((c): [string, number] => [c.option, c.count]),
-      );
-    }
-
-    const quoteSections: [string, { name: string; text: string }[]][] = [
-      ['What they liked', r.liked],
+    const charts: [string, [string, number][]][] = [
+      ...(r.bySource.length
+        ? [
+            [
+              'How they were recorded',
+              r.bySource.map((s): [string, number] => [s.label, s.count]),
+            ] as [string, [string, number][]],
+          ]
+        : []),
       ...r.fields
-        .filter((f) => f.quotes?.length)
-        .map((f): [string, { name: string; text: string }[]] => [
+        .filter((f) => f.counts && f.type !== 'YES_NO')
+        .map((f): [string, [string, number][]] => [
           f.label,
-          f.quotes!,
+          f.counts!.map((c): [string, number] => [c.option, c.count]),
         ]),
     ];
-    for (const [title, quotes] of quoteSections) {
-      if (!quotes.length) continue;
-      y = this.sectionStart(doc, y + 8, title, quotes.length);
-      autoTable(doc, {
-        startY: y,
-        margin: { left: MARGIN, right: MARGIN },
-        body: quotes.map((q) => [q.text, q.name]),
-        columnStyles: { 1: { cellWidth: 32, textColor: MUTED } },
-        bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
-        alternateRowStyles: { fillColor: branding.theme.soft },
-      });
-      y = this.tableEnd(doc);
+    for (const [title, rows] of charts) {
+      y = this.sectionStart(doc, y + 10, title, rows.length);
+      y = this.drawCountTable(doc, y, branding, rows);
+    }
+
+    const yesNo = r.fields.filter((f) => f.type === 'YES_NO');
+    if (yesNo.length) {
+      y = this.sectionStart(doc, y + 10, 'Yes or no questions', yesNo.length);
+      y = this.drawCountTable(
+        doc,
+        y,
+        branding,
+        yesNo.map((f): [string, number] => [
+          `${f.label} (yes)`,
+          f.counts?.[0]?.count ?? 0,
+        ]),
+      );
+    }
+
+    if (r.liked.length) {
+      y = this.sectionStart(doc, y + 10, 'What they liked', 2);
+      y = this.drawQuoteCards(doc, y + 1, r.liked, theme.accent);
+    }
+    for (const f of r.fields.filter((f) => f.quotes?.length)) {
+      y = this.sectionStart(doc, y + 10, f.label, 2);
+      y = this.drawQuoteCards(
+        doc,
+        y + 1,
+        f.quotes!,
+        f.key === 'improve' ? WATCH : theme.accent,
+      );
     }
 
     const pages = doc.getNumberOfPages();
@@ -2387,12 +2454,255 @@ export class PdfService {
         .setFontSize(7.5)
         .setTextColor(MUTED)
         .text(
-          `Follow-Up Monthly Report · ${monthName(r.month)} · Page ${i} of ${pages}`,
+          `${branding.churchName} · Follow-Up Monthly Report · ${monthName(r.month)} · Page ${i} of ${pages}`,
           PAGE_W / 2,
           290,
           { align: 'center' },
         );
     }
+  }
+
+  // A full-width band in the church's colours, with the logo, the report's name and its period.
+  private drawReportCover(
+    doc: jsPDF,
+    branding: PdfBranding,
+    title: string,
+    period: string,
+  ): number {
+    const h = 44;
+    doc.setFillColor(branding.theme.brand);
+    doc.rect(0, 0, PAGE_W, h, 'F');
+    let x = MARGIN;
+    if (branding.logoImage) {
+      try {
+        doc.addImage(
+          branding.logoImage.dataUrl,
+          branding.logoImage.format,
+          MARGIN,
+          9,
+          14,
+          14,
+          undefined,
+          'FAST',
+        );
+        x = MARGIN + 18;
+      } catch {
+        x = MARGIN;
+      }
+    }
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(9)
+      .setTextColor(WHITE)
+      .text(branding.churchName, x, 14);
+    if (branding.churchTagline)
+      doc
+        .setFont('helvetica', 'normal')
+        .setFontSize(8)
+        .setTextColor(branding.theme.accent)
+        .text(branding.churchTagline, x, 19);
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(20)
+      .setTextColor(WHITE)
+      .text(title, MARGIN, 34);
+    doc
+      .setFont('helvetica', 'normal')
+      .setFontSize(12)
+      .setTextColor(branding.theme.accent)
+      .text(period, PAGE_W - MARGIN, 34, { align: 'right' });
+    return h + 8;
+  }
+
+  // Horizontal cards: a big number, what it is, and an optional coloured note. Wraps after four.
+  private drawStatCards(
+    doc: jsPDF,
+    y: number,
+    theme: ChurchThemeColors,
+    cards: { value: string; label: string; note?: string; tone?: StatTone }[],
+  ): number {
+    const perRow = Math.min(4, Math.max(cards.length, 1));
+    const gap = 4;
+    const w = (CONTENT_W - gap * (perRow - 1)) / perRow;
+    const h = 27;
+    cards.forEach((c, i) => {
+      const row = Math.floor(i / perRow);
+      const cx = MARGIN + (i % perRow) * (w + gap);
+      const cy = y + row * (h + gap);
+      const tone = c.tone ? TONES[c.tone] : null;
+      doc.setFillColor(tone?.fill ?? theme.tint);
+      doc.roundedRect(cx, cy, w, h, 2.5, 2.5, 'F');
+      doc.setFillColor(tone?.ink ?? theme.brand);
+      doc.rect(cx, cy + 3, 1.2, h - 6, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(19)
+        .setTextColor(tone?.ink ?? theme.brand)
+        .text(c.value, cx + 5, cy + 11);
+      const label = doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(7.5)
+        .splitTextToSize(c.label, w - 8);
+      doc.setTextColor(DARK).text(label.slice(0, 2), cx + 5, cy + 17);
+      if (c.note)
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(7)
+          .setTextColor(tone?.ink ?? MUTED)
+          .text(c.note, cx + 5, cy + h - 3);
+    });
+    return y + Math.ceil(cards.length / perRow) * (h + gap) - gap;
+  }
+
+  // "Going well" and "Needs attention" side by side, the same height.
+  private drawHighlightBoxes(
+    doc: jsPDF,
+    y: number,
+    h: { good: string[]; watch: string[] },
+  ): number {
+    const gap = 4;
+    const w = (CONTENT_W - gap) / 2;
+    const boxes = [
+      {
+        title: 'Going well',
+        items: h.good,
+        tone: TONES.good,
+        empty: 'Nothing stands out this month.',
+      },
+      {
+        title: 'Needs attention',
+        items: h.watch,
+        tone: TONES.watch,
+        empty: 'Nothing needs attention this month.',
+      },
+    ].map((b) => ({
+      ...b,
+      lines: (b.items.length ? b.items : [b.empty]).map(
+        (t) =>
+          doc
+            .setFont('helvetica', 'normal')
+            .setFontSize(8.5)
+            .splitTextToSize(t, w - 14) as string[],
+      ),
+    }));
+    const height =
+      Math.max(
+        ...boxes.map(
+          (b) => 14 + b.lines.reduce((n, l) => n + l.length * 4 + 2, 0),
+        ),
+      ) + 2;
+    if (y + height > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    boxes.forEach((b, i) => {
+      const x = MARGIN + i * (w + gap);
+      doc.setFillColor(b.tone.fill);
+      doc.roundedRect(x, y, w, height, 2.5, 2.5, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(10)
+        .setTextColor(b.tone.ink)
+        .text(b.title, x + 5, y + 8);
+      let ly = y + 14.5;
+      b.lines.forEach((lines) => {
+        if (b.items.length) {
+          doc.setFillColor(b.tone.ink);
+          doc.circle(x + 6.5, ly - 1.2, 0.9, 'F');
+        }
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .setTextColor(DARK)
+          .text(lines, x + 10, ly);
+        ly += lines.length * 4 + 2;
+      });
+    });
+    return y + height;
+  }
+
+  // Vertical bars per day; the busiest day in the church's main colour.
+  private drawDayChart(
+    doc: jsPDF,
+    y: number,
+    theme: ChurchThemeColors,
+    days: { date: string; count: number }[],
+    busiest: string | undefined,
+    label: (date: string) => string,
+  ): number {
+    const chartH = 42;
+    const max = Math.max(1, ...days.map((d) => d.count));
+    const slot = CONTENT_W / days.length;
+    const barW = Math.min(16, slot * 0.6);
+    doc
+      .setDrawColor(theme.accent)
+      .setLineWidth(0.2)
+      .line(MARGIN, y + chartH, MARGIN + CONTENT_W, y + chartH);
+    days.forEach((d, i) => {
+      const bh = Math.max(0.8, ((chartH - 8) * d.count) / max);
+      const x = MARGIN + i * slot + (slot - barW) / 2;
+      doc.setFillColor(d.date === busiest ? theme.brand : theme.accent);
+      doc.roundedRect(x, y + chartH - bh, barW, bh, 1, 1, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(8)
+        .setTextColor(DARK)
+        .text(String(d.count), x + barW / 2, y + chartH - bh - 1.5, {
+          align: 'center',
+        });
+      doc
+        .setFont('helvetica', 'normal')
+        .setFontSize(7)
+        .setTextColor(MUTED)
+        .text(label(d.date), x + barW / 2, y + chartH + 4.5, {
+          align: 'center',
+        });
+    });
+    return y + chartH + 6;
+  }
+
+  // Two columns of quote cards with the person's first name.
+  private drawQuoteCards(
+    doc: jsPDF,
+    y: number,
+    quotes: { name: string; text: string }[],
+    edge: string,
+  ): number {
+    const gap = 4;
+    const w = (CONTENT_W - gap) / 2;
+    for (let i = 0; i < quotes.length; i += 2) {
+      const pair = quotes.slice(i, i + 2).map((q) => ({
+        q,
+        lines: doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .splitTextToSize(`“${q.text}”`, w - 10) as string[],
+      }));
+      const h = Math.max(...pair.map((p) => p.lines.length)) * 4 + 11;
+      if (y + h > 282) {
+        doc.addPage();
+        y = 20;
+      }
+      pair.forEach((p, j) => {
+        const x = MARGIN + j * (w + gap);
+        doc.setFillColor('#FAFAF8');
+        doc.roundedRect(x, y, w, h, 2, 2, 'F');
+        doc.setFillColor(edge);
+        doc.rect(x, y + 2, 1.2, h - 4, 'F');
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .setTextColor(DARK)
+          .text(p.lines, x + 5, y + 6);
+        doc
+          .setFont('helvetica', 'bold')
+          .setFontSize(7.5)
+          .setTextColor(MUTED)
+          .text(p.q.name, x + 5, y + h - 3);
+      });
+      y += h + gap;
+    }
+    return y - gap;
   }
 
   // Starts a section on a new page when its title and first rows (or the whole of a short table) won't fit.
@@ -2402,21 +2712,25 @@ export class PdfService {
     title: string,
     rows: number,
   ): number {
-    const needed = 12 + (rows <= 8 ? rows : 3) * 7;
+    const needed = 14 + (rows <= 8 ? rows : 3) * 7;
     if (y + needed > 280) {
       doc.addPage();
       y = 20;
     }
-    return this.drawAccountSectionTitle(doc, y, title);
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(12)
+      .setTextColor(DARK)
+      .text(title, MARGIN, y);
+    return y + 5;
   }
 
-  // Label, count, and a bar scaled to the largest count (or to the first row when it's the total).
+  // Label, count, and a bar on a light track, scaled to the largest count.
   private drawCountTable(
     doc: jsPDF,
     y: number,
     branding: PdfBranding,
     rows: [string, number][],
-    bars = true,
   ): number {
     const max = Math.max(1, ...rows.map(([, n]) => n));
     autoTable(doc, {
@@ -2424,22 +2738,35 @@ export class PdfService {
       margin: { left: MARGIN, right: MARGIN },
       body: rows.map(([label, n]) => [label, String(n), '']),
       columnStyles: {
-        0: { cellWidth: CONTENT_W * 0.45 },
-        1: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+        0: { cellWidth: CONTENT_W * 0.42 },
+        1: { cellWidth: 16, halign: 'right', fontStyle: 'bold' },
       },
-      bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: branding.theme.soft },
+      bodyStyles: {
+        fontSize: 8.5,
+        textColor: DARK,
+        fillColor: WHITE,
+        cellPadding: 2.2,
+      },
+      alternateRowStyles: { fillColor: '#FAFAF8' },
       didDrawCell: (data) => {
-        if (!bars || data.section !== 'body' || data.column.index !== 2) return;
+        if (data.section !== 'body' || data.column.index !== 2) return;
         const n = rows[data.row.index][1];
-        const w = ((data.cell.width - 6) * n) / max;
+        const full = data.cell.width - 8;
+        const top = data.cell.y + data.cell.height / 2 - 1.6;
+        doc.setFillColor(branding.theme.tint);
+        doc.roundedRect(data.cell.x + 4, top, full, 3.2, 1.6, 1.6, 'F');
+        const w = (full * n) / max;
         if (w <= 0) return;
-        doc.setFillColor(branding.theme.brand);
-        doc.rect(
-          data.cell.x + 3,
-          data.cell.y + data.cell.height / 2 - 1.5,
-          w,
-          3,
+        doc.setFillColor(
+          n === max ? branding.theme.brand : branding.theme.accent,
+        );
+        doc.roundedRect(
+          data.cell.x + 4,
+          top,
+          Math.max(w, 3.2),
+          3.2,
+          1.6,
+          1.6,
           'F',
         );
       },
