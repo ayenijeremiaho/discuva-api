@@ -302,6 +302,7 @@ export type AuditAction =
   | 'REPORT_EXPORTED'
   // Rites of passage / membership anniversary
   | 'MEMBERSHIP_ANNIVERSARY_GREETED'
+  | 'ANNIVERSARY_SETTINGS_UPDATED'
   // Service ratings
   | 'SERVICE_RATING_MODERATED'
   // Volunteer marketplace

@@ -5097,6 +5097,10 @@ Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts cr
 
 **Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
 
+**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, message }`. Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
+
+**Admin routes:** `GET /anniversaries?days=` (members:read; 0–365, default 7) lists ACTIVE members whose anniversary is today (`daysAway: 0`) or within the window, soonest first, with `years` and `daysAway`; computed in one query from `age(today, date_joined_church)` (29 Feb joiners fall on 28 Feb in other years; a full scan of `members`, same as the birthday list). `GET /anniversaries/settings` (members:read), `PATCH /anniversaries/settings` (announcements:write).
+
 ### Dashboard Module
 
 Aggregated data endpoints per role. Does not store data — assembles from other services.
@@ -19504,6 +19508,10 @@ Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts cr
 `EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED`, default `true`, same convention as every other email category).
 
 **Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
+
+**Post settings:** stored in `church_settings` under key `anniversary:post` (same table reminder settings use), read through `AnniversarySettingsService.get()` (cached 5 min, cleared on update): `{ postEnabled, title, message }`. Defaults: post on, title `Celebrating {years} with {first_name}!`. Placeholders `{years}` (rendered "1 year" / "5 years"), `{first_name}`, `{full_name}`. With the post off the member is still emailed and marked greeted. Audit: `ANNIVERSARY_SETTINGS_UPDATED`.
+
+**Admin routes:** `GET /anniversaries?days=` (members:read; 0–365, default 7) lists ACTIVE members whose anniversary is today (`daysAway: 0`) or within the window, soonest first, with `years` and `daysAway`; computed in one query from `age(today, date_joined_church)` (29 Feb joiners fall on 28 Feb in other years; a full scan of `members`, same as the birthday list). `GET /anniversaries/settings` (members:read), `PATCH /anniversaries/settings` (announcements:write).
 
 ### Dashboard Module
 
