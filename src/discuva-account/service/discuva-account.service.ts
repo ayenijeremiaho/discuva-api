@@ -699,6 +699,26 @@ export class DiscuvaAccountService {
 
   // Basics from the person's member record at a church they already belong to.
   async basicsFrom(accountId: string): Promise<Partial<Member> | null> {
+    const first = await this.firstChurchRecord(accountId);
+    if (!first) return null;
+    const m = first.member;
+    return {
+      id: m.id,
+      firstname: m.firstname,
+      lastname: m.lastname,
+      phoneNumber: m.phoneNumber,
+      gender: m.gender,
+      birthDay: m.birthDay,
+      birthMonth: m.birthMonth,
+      birthYear: m.birthYear,
+      maritalStatus: m.maritalStatus,
+    };
+  }
+
+  // The person's record at the church they joined first: where a new profile starts.
+  async firstChurchRecord(
+    accountId: string,
+  ): Promise<{ tenantId: string; member: Member } | null> {
     const [first] = await this.linksOf(accountId);
     if (!first) return null;
     const tenant = await this.tenantRepo.findOne({
@@ -706,26 +726,13 @@ export class DiscuvaAccountService {
       select: { id: true, schemaName: true },
     });
     if (!tenant) return null;
-    return runInTenantContext(
+    const member = await runInTenantContext(
       this.cls,
       this.txHost,
       { tenantId: tenant.id, schemaName: tenant.schemaName },
-      () =>
-        this.memberRepo.findOne({
-          where: { id: first.memberId },
-          select: {
-            id: true,
-            firstname: true,
-            lastname: true,
-            phoneNumber: true,
-            gender: true,
-            birthDay: true,
-            birthMonth: true,
-            birthYear: true,
-            maritalStatus: true,
-          },
-        }),
+      () => this.memberRepo.findOne({ where: { id: first.memberId } }),
     );
+    return member ? { tenantId: tenant.id, member } : null;
   }
 
   // Under-18s keep church-only sign-in.

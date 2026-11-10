@@ -11562,9 +11562,9 @@ existing screen, report and query keeps reading the church's `members` row. Off 
   name, phone, birthday, gender, marital status, address or emergency contact; unchanged values sent by a full form are
   ignored, and church fields (date joined, worker and clergy details, status) stay editable. `PATCH /members/me`,
   `PATCH /members/me/appearance` and notification choices save to the profile and every linked church
-  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created from the current
-  church's full record the first time it's needed (`ensure`), and the person's `year_born_again` and `year_baptized`
-  become their own milestones then.
+  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created the first time it's
+  needed (`ensure`) from the person's full record at the church they joined first (`firstChurchRecord`), so each church
+  linked later is compared against it; their `year_born_again` and `year_baptized` there become their own milestones.
 - **Joining and linking.** Joining with an account starts the new church from the profile. With Global Profile on,
   `POST /auth/join/complete` and `POST /auth/account/link/confirm` need `consent: true` (`400` otherwise) and record
   `consented_at`; people linked earlier see `needsConsent` once and answer with `POST /auth/account/consent`. Linking and
@@ -14277,9 +14277,9 @@ existing screen, report and query keeps reading the church's `members` row. Off 
   name, phone, birthday, gender, marital status, address or emergency contact; unchanged values sent by a full form are
   ignored, and church fields (date joined, worker and clergy details, status) stay editable. `PATCH /members/me`,
   `PATCH /members/me/appearance` and notification choices save to the profile and every linked church
-  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created from the current
-  church's full record the first time it's needed (`ensure`), and the person's `year_born_again` and `year_baptized`
-  become their own milestones then.
+  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created the first time it's
+  needed (`ensure`) from the person's full record at the church they joined first (`firstChurchRecord`), so each church
+  linked later is compared against it; their `year_born_again` and `year_baptized` there become their own milestones.
 - **Joining and linking.** Joining with an account starts the new church from the profile. With Global Profile on,
   `POST /auth/join/complete` and `POST /auth/account/link/confirm` need `consent: true` (`400` otherwise) and record
   `consented_at`; people linked earlier see `needsConsent` once and answer with `POST /auth/account/consent`. Linking and

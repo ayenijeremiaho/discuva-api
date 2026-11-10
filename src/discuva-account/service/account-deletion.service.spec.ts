@@ -8,7 +8,7 @@ import { DiscuvaAccountCodeService } from './discuva-account-code.service';
 import { DiscuvaProfileService } from './discuva-profile.service';
 import { DiscuvaAccount } from '../entity/discuva-account.entity';
 import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity';
-import { ACCOUNT_DELETION_QUEUE } from '../processor/account-deletion.processor';
+import { ACCOUNT_DELETION_QUEUE } from '../processor/account-deletion.queue';
 import { Member } from '../../member/entity/member.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';

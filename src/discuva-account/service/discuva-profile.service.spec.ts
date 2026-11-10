@@ -44,6 +44,7 @@ const memberRepo = {
 };
 const accounts = {
   isProfileOn: jest.fn(),
+  firstChurchRecord: jest.fn(),
   forEachChurchOf: jest.fn(
     async (
       _member: unknown,
@@ -125,12 +126,17 @@ describe('DiscuvaProfileService', () => {
   });
 
   describe('creating the profile', () => {
-    it("copies this church's full record, even when the caller loaded only a few fields", async () => {
+    it('starts from the full record at the church the person joined first', async () => {
       profileRepo.findOne.mockResolvedValue(null);
-      memberRepo.findOneOrFail.mockResolvedValue(churchRow);
+      accounts.firstChurchRecord.mockResolvedValue({
+        tenantId: 't-first',
+        member: churchRow,
+      });
       profileRepo.findOneOrFail.mockResolvedValue({ accountId: 'acc-1' });
 
       await service.ensure({ id: 'm-here', discuvaAccountId: 'acc-1' });
+
+      expect(memberRepo.findOneOrFail).not.toHaveBeenCalled();
 
       const values = insert.values.mock.calls[0][0];
       for (const f of PROFILE_FIELDS) expect(values[f]).toEqual(churchRow[f]);
@@ -143,8 +149,25 @@ describe('DiscuvaProfileService', () => {
       expect(insert.orIgnore).toHaveBeenCalled();
     });
 
+    it("uses this church's full record when no church is linked yet", async () => {
+      profileRepo.findOne.mockResolvedValue(null);
+      accounts.firstChurchRecord.mockResolvedValue(null);
+      memberRepo.findOneOrFail.mockResolvedValue(churchRow);
+      profileRepo.findOneOrFail.mockResolvedValue({ accountId: 'acc-1' });
+
+      await service.ensure({ id: 'm-here', discuvaAccountId: 'acc-1' });
+
+      expect(memberRepo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 'm-here' },
+      });
+      expect(insert.values.mock.calls[0][0].phoneNumber).toBe(
+        churchRow.phoneNumber,
+      );
+    });
+
     it("turns the years given to the church into the person's own milestones", async () => {
       profileRepo.findOne.mockResolvedValue(null);
+      accounts.firstChurchRecord.mockResolvedValue(null);
       memberRepo.findOneOrFail.mockResolvedValue({
         ...churchRow,
         yearBornAgain: '2008-01-01',

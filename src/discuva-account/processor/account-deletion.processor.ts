@@ -2,20 +2,10 @@ import { Logger } from '@nestjs/common';
 import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job } from 'bull';
 import { AccountDeletionService } from '../service/account-deletion.service';
-
-export const ACCOUNT_DELETION_QUEUE = 'discuva-account-deletion';
-
-export interface AccountDeletionJobData {
-  accountId: string;
-  // The request this job was queued for; a cancelled or newer request makes it a no-op.
-  requestedAt: number;
-}
-
-export const ACCOUNT_DELETION_OPTIONS = {
-  attempts: 5,
-  backoff: { type: 'exponential', delay: 300_000 },
-  removeOnComplete: true,
-};
+import {
+  ACCOUNT_DELETION_QUEUE,
+  AccountDeletionJobData,
+} from './account-deletion.queue';
 
 @Processor(ACCOUNT_DELETION_QUEUE)
 export class AccountDeletionProcessor {

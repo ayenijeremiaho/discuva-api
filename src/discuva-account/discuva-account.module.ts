@@ -20,10 +20,8 @@ import { MilestoneService } from './service/milestone.service';
 import { PhotoRemovalService } from './service/photo-removal.service';
 import { AccountDataService } from './service/account-data.service';
 import { AccountDeletionService } from './service/account-deletion.service';
-import {
-  ACCOUNT_DELETION_QUEUE,
-  AccountDeletionProcessor,
-} from './processor/account-deletion.processor';
+import { AccountDeletionProcessor } from './processor/account-deletion.processor';
+import { ACCOUNT_DELETION_QUEUE } from './processor/account-deletion.queue';
 import { BullModule } from '@nestjs/bull';
 
 // Global so member and auth code can reach it without an import cycle through MemberModule.

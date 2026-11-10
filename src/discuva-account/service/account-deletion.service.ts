@@ -18,7 +18,7 @@ import {
   ACCOUNT_DELETION_OPTIONS,
   ACCOUNT_DELETION_QUEUE,
   AccountDeletionJobData,
-} from '../processor/account-deletion.processor';
+} from '../processor/account-deletion.queue';
 import { Member } from '../../member/entity/member.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';

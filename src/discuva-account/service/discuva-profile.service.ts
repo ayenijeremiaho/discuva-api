@@ -83,9 +83,12 @@ export class DiscuvaProfileService {
     if (!accountId) throw new Error(`Member ${member.id} has no account`);
     const existing = await this.profileRepo.findOne({ where: { accountId } });
     if (existing) return existing;
-    const source = await this.memberRepo.findOneOrFail({
-      where: { id: member.id },
-    });
+    // Start from the first church, so each church linked later is compared against it.
+    const first = await this.accounts.firstChurchRecord(accountId);
+    const source =
+      first?.member ??
+      (await this.memberRepo.findOneOrFail({ where: { id: member.id } }));
+    const sourceTenantId = first?.tenantId ?? this.cls.get('tenantId') ?? null;
     await this.profileRepo
       .createQueryBuilder()
       .insert()
@@ -100,7 +103,7 @@ export class DiscuvaProfileService {
       })
       .orIgnore()
       .execute();
-    await this.importFaithYears(accountId, source);
+    await this.importFaithYears(accountId, source, sourceTenantId);
     return this.profileRepo.findOneOrFail({ where: { accountId } });
   }
 
@@ -108,8 +111,8 @@ export class DiscuvaProfileService {
   private async importFaithYears(
     accountId: string,
     source: Member,
+    sourceTenantId: string | null,
   ): Promise<void> {
-    const sourceTenantId = this.cls.get('tenantId') ?? null;
     const rows = (
       [
         [MilestoneType.SALVATION, source.yearBornAgain],
