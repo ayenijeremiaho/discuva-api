@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DateService } from '../../utility/service/date.service';
+
+const END_OF_DAY = new Date('2026-06-15T22:59:59.999Z');
 
 // AnnouncementService transitively imports SanitizationService, which pulls
 // in jsdom — mocked here (as announcement.service.spec.ts does) so this
@@ -22,6 +25,14 @@ import { AnnouncementService } from '../../announcement/service/announcement.ser
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import {
+  AnniversarySettingsService,
+  DEFAULT_ANNIVERSARY_SETTINGS,
+} from './anniversary-settings.service';
+
+const mockSettingsService = {
+  get: jest.fn().mockResolvedValue(DEFAULT_ANNIVERSARY_SETTINGS),
+};
 
 const makeQb = () => ({
   where: jest.fn().mockReturnThis(),
@@ -95,6 +106,11 @@ describe('MembershipAnniversaryService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        {
+          provide: DateService,
+          useValue: { endOfDay: () => END_OF_DAY, today: () => '2026-11-10' },
+        },
+        { provide: AnniversarySettingsService, useValue: mockSettingsService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -133,8 +149,10 @@ describe('MembershipAnniversaryService', () => {
       expect(
         mockAnnouncementService.createSystemAnnouncement,
       ).toHaveBeenCalledWith(
-        expect.stringContaining('5 years'),
-        expect.stringContaining('5 years'),
+        'Celebrating 5 years with John!',
+        expect.stringContaining('5 years since John'),
+        undefined,
+        END_OF_DAY,
       );
       expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
         'john@example.com',
@@ -148,6 +166,54 @@ describe('MembershipAnniversaryService', () => {
         'MEMBERSHIP_ANNIVERSARY_GREETED',
         expect.objectContaining({ targetId: 'm1', metadata: { years: 5 } }),
       );
+    });
+
+    it('says "1 year" for a first anniversary', async () => {
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([
+        makeMember({ dateJoinedChurch: new Date(`${CURRENT_YEAR - 1}-06-15`) }),
+      ]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.triggerAnniversaryGreetings();
+
+      expect(
+        mockAnnouncementService.createSystemAnnouncement,
+      ).toHaveBeenCalledWith(
+        'Celebrating 1 year with John!',
+        expect.any(String),
+        undefined,
+        END_OF_DAY,
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'john@example.com',
+        'Celebrating 1 Year, John!',
+        expect.any(String),
+        expect.any(Object),
+        undefined,
+        expect.any(String),
+      );
+    });
+
+    it('uses the church wording, and skips the post but still emails when the post is off', async () => {
+      mockSettingsService.get.mockResolvedValueOnce({
+        postEnabled: false,
+        title: 'x',
+        body: 'y',
+      });
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([makeMember({ id: 'm1' })]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.triggerAnniversaryGreetings();
+
+      expect(
+        mockAnnouncementService.createSystemAnnouncement,
+      ).not.toHaveBeenCalled();
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalled();
+      expect(mockMemberRepo.update).toHaveBeenCalledWith('m1', {
+        anniversaryGreetedYear: CURRENT_YEAR,
+      });
     });
 
     it('queries only ACTIVE members with a join date, not yet greeted this year, and excludes the join year itself', async () => {

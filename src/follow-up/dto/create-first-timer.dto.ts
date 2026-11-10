@@ -2,9 +2,11 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -66,4 +68,14 @@ export class CreateFirstTimerDto {
   @Transform(emptyToUndefined)
   @IsUUID()
   visitedEventId?: string;
+
+  // Keyed by card field id; checked against the church's switched-on fields.
+  @IsOptional()
+  @IsObject()
+  answers?: Record<string, unknown>;
+
+  // YYYY-MM-DD, for cards typed in after the day. Ignored on self sign-up, which is always today.
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  visitedOn?: string;
 }

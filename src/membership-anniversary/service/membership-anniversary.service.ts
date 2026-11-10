@@ -16,6 +16,15 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { DateService } from '../../utility/service/date.service';
+import {
+  AnniversarySettingsService,
+  renderAnniversaryText,
+} from './anniversary-settings.service';
+import {
+  AnniversaryCelebrant,
+  AnniversarySettings,
+} from '../dto/anniversary-settings.dto';
 
 @Injectable()
 export class MembershipAnniversaryService implements OnApplicationBootstrap {
@@ -34,6 +43,8 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
+    private readonly dateService: DateService,
+    private readonly settingsService: AnniversarySettingsService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
@@ -109,6 +120,9 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
             )
             .getMany();
 
+          if (!celebrants.length) return;
+          const settings = await this.settingsService.get();
+
           for (const member of celebrants) {
             try {
               // getUTCFullYear (not getFullYear) — dateJoinedChurch is a
@@ -117,7 +131,7 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
               // to the prior year.
               const years =
                 year - new Date(member.dateJoinedChurch).getUTCFullYear();
-              await this.greetMember(member, years);
+              await this.greetMember(member, years, settings);
               await this.memberRepository.update(member.id, {
                 anniversaryGreetedYear: year,
               });
@@ -141,15 +155,23 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     }
   }
 
-  private async greetMember(member: Member, years: number): Promise<void> {
-    await this.announcementService.createSystemAnnouncement(
-      `Celebrating ${years} years with ${member.firstname}!`,
-      `Today marks ${years} years since ${member.firstname} ${member.lastname} joined our church family. Join us in celebrating this milestone!`,
-    );
+  private async greetMember(
+    member: Member,
+    years: number,
+    settings: AnniversarySettings,
+  ): Promise<void> {
+    if (settings.postEnabled) {
+      await this.announcementService.createSystemAnnouncement(
+        renderAnniversaryText(settings.title, member, years),
+        renderAnniversaryText(settings.body, member, years),
+        undefined,
+        this.dateService.endOfDay(),
+      );
+    }
 
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `Celebrating ${years} Years, ${member.firstname}!`,
+      `Celebrating ${years} ${years === 1 ? 'Year' : 'Years'}, ${member.firstname}!`,
       'membership-anniversary',
       {
         name: member.firstname,
@@ -164,5 +186,46 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
       targetId: member.id,
       metadata: { years },
     });
+  }
+
+  // Today (daysAway 0) and the next `days` days, soonest first. A full year or more only.
+  async getCelebrants(days: number): Promise<AnniversaryCelebrant[]> {
+    const rows = await this.memberRepository.query<
+      (Omit<AnniversaryCelebrant, 'years' | 'daysAway'> & {
+        years: number;
+        daysAway: number;
+      })[]
+    >(
+      `WITH c AS (
+         SELECT m.id, m.firstname, m.lastname, m.email,
+                m.phone_number AS "phoneNumber", m.photo_url AS "photoUrl",
+                to_char(m.date_joined_church, 'YYYY-MM-DD') AS "dateJoinedChurch",
+                m.date_joined_church AS joined,
+                EXTRACT(YEAR FROM age($1::date, m.date_joined_church))::int AS done
+           FROM members m
+          WHERE m.status = $3
+            AND m.date_joined_church IS NOT NULL
+            AND m.date_joined_church < $1::date
+       ), n AS (
+         SELECT c.*,
+                (c.joined + c.done * interval '1 year')::date = $1::date AS is_today
+           FROM c
+       )
+       SELECT id, firstname, lastname, email, "phoneNumber", "photoUrl", "dateJoinedChurch",
+              CASE WHEN is_today THEN done ELSE done + 1 END AS years,
+              CASE WHEN is_today THEN 0
+                   ELSE (joined + (done + 1) * interval '1 year')::date - $1::date END AS "daysAway"
+         FROM n
+        WHERE (CASE WHEN is_today THEN done ELSE done + 1 END) >= 1
+          AND (CASE WHEN is_today THEN 0
+                    ELSE (joined + (done + 1) * interval '1 year')::date - $1::date END) <= $2
+        ORDER BY "daysAway", firstname, lastname`,
+      [this.dateService.today(), days, MemberStatusEnum.ACTIVE],
+    );
+    return rows.map((r) => ({
+      ...r,
+      years: Number(r.years),
+      daysAway: Number(r.daysAway),
+    }));
   }
 }

@@ -30,6 +30,13 @@ import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Event } from '../../event/entity/event.entity';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import { FirstTimerCardService } from './first-timer-card.service';
+import { DateService } from '../../utility/service/date.service';
+
+const mockCardService = {
+  cleanAnswers: jest.fn().mockResolvedValue({}),
+  enabledFields: jest.fn().mockResolvedValue([]),
+};
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -285,6 +292,8 @@ describe('FollowUpService', () => {
           provide: FirstTimerConvertService,
           useValue: mockFirstTimerConvertService,
         },
+        { provide: FirstTimerCardService, useValue: mockCardService },
+        { provide: DateService, useValue: { today: () => '2026-11-10' } },
       ],
     }).compile();
 
@@ -524,8 +533,33 @@ describe('FollowUpService', () => {
           source: FirstTimerSourceEnum.APP_SIGNUP,
           createdByMember: null,
           createdByAdmin: null,
+          visitedOn: '2026-11-10',
         }),
       );
+      expect(mockCardService.cleanAnswers).toHaveBeenCalledWith(undefined, {
+        requireAll: true,
+      });
+    });
+
+    it('ignores a visit date sent with a self sign-up', async () => {
+      let capturedCreateArgs: any;
+      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockManager.create.mockImplementation((entity: any, args: any) => {
+        if (entity === FirstTimer) capturedCreateArgs = args;
+        return args;
+      });
+      mockManager.save.mockImplementation((v: any) => Promise.resolve(v));
+
+      await service
+        .createFirstTimerFromAppSignup({
+          firstname: 'Ada',
+          lastname: 'Okoye',
+          phone: '+2348012345679',
+          visitedOn: '2026-01-01',
+        } as any)
+        .catch(() => undefined);
+
+      expect(capturedCreateArgs?.visitedOn).toBe('2026-11-10');
     });
   });
 
@@ -877,6 +911,38 @@ describe('FollowUpService', () => {
   // ── updateFirstTimer ─────────────────────────────────────────────────────
 
   describe('updateFirstTimer', () => {
+    it('refuses a visit date in the future', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce({
+        id: 'ft-1',
+        answers: {},
+      });
+      await expect(
+        service.updateFirstTimer('ft-1', { visitedOn: '2026-11-11' }),
+      ).rejects.toThrow("can't be in the future");
+    });
+
+    it('replaces answers to switched-on fields and keeps answers to switched-off ones', async () => {
+      const ft = { id: 'ft-1', answers: { on: 'old', off: 'kept' } };
+      mockFirstTimerRepo.findOne
+        .mockResolvedValueOnce(ft)
+        .mockResolvedValueOnce(ft);
+      mockFirstTimerRepo.save.mockResolvedValue(undefined);
+      mockCardService.enabledFields.mockResolvedValueOnce([{ id: 'on' }]);
+      mockCardService.cleanAnswers.mockResolvedValueOnce({ on: 'new' });
+
+      await service.updateFirstTimer('ft-1', {
+        answers: { on: 'new' },
+        visitedOn: '2026-10-04',
+      });
+
+      expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          answers: { off: 'kept', on: 'new' },
+          visitedOn: '2026-10-04',
+        }),
+      );
+    });
+
     it('throws NotFoundException when first-timer not found', async () => {
       mockFirstTimerRepo.findOne.mockResolvedValueOnce(null);
       await expect(
@@ -1089,30 +1155,40 @@ describe('FollowUpService', () => {
       expect(report.period.to).toBe(to.toISOString());
     });
 
-    it('computes conversionRate correctly', async () => {
-      qbMock.getRawOne.mockResolvedValue({
-        total: '0',
-        wantsToJoinChurch: '0',
-        wantsToJoinWorkforce: '0',
-        count: '0',
-      });
+    it('computes conversionRate from first-timer tasks only', async () => {
+      qbMock.getRawOne
+        .mockResolvedValueOnce({ total: '0' }) // firstTimerRows
+        .mockResolvedValueOnce({ count: '0' }) // overdue
+        .mockResolvedValueOnce({ total: '15', joined: '4' }); // first-timer tasks
       qbMock.getRawMany
         .mockResolvedValueOnce([]) // sourceRows
         .mockResolvedValueOnce([
-          // taskStatusRows
-          { status: 'COMPLETED', count: '10' },
-          { status: 'PENDING', count: '5' },
+          // taskStatusRows, all task types
+          { status: 'COMPLETED', count: '12' },
+          { status: 'PENDING', count: '8' },
         ])
-        .mockResolvedValueOnce([
-          // outcomeRows
-          { outcome: 'JOINED', count: '4' },
-        ])
-        .mockResolvedValueOnce([]) // workerRows
-        .mockResolvedValueOnce([]); // eventRows
+        .mockResolvedValueOnce([{ outcome: 'JOINED', count: '4' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
 
       const report = await service.getReport();
-      expect(report.tasks.total).toBe(15);
+      expect(report.tasks.total).toBe(20);
       expect(report.tasks.conversionRate).toBe('26.7%');
+      expect(qbMock.where).toHaveBeenCalledWith('task.type = :type', {
+        type: 'FIRST_TIMER',
+      });
+    });
+
+    it('filters by a start date alone instead of falling back to all time', async () => {
+      const from = new Date('2026-10-01T00:00:00Z');
+      await service.getReport(from, undefined);
+      expect(qbMock.andWhere).toHaveBeenCalledWith('ft.created_at >= :from', {
+        from,
+      });
+      expect(qbMock.andWhere).not.toHaveBeenCalledWith(
+        expect.stringContaining(':to'),
+        expect.anything(),
+      );
     });
 
     it('maps byWorker and byEvent rows to numbers', async () => {

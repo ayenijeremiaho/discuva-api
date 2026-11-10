@@ -75,4 +75,21 @@ describe('DateService', () => {
       expect(service.today()).toBe('2026-07-16');
     });
   });
+
+  describe('rangeBound', () => {
+    it('covers the whole church-time day for a bare date', () => {
+      expect(service.rangeBound('2026-10-31', 'start').toISOString()).toBe(
+        '2026-10-30T23:00:00.000Z',
+      );
+      expect(service.rangeBound('2026-10-31', 'end').toISOString()).toBe(
+        '2026-10-31T22:59:59.999Z',
+      );
+    });
+
+    it('keeps a full timestamp as given', () => {
+      expect(
+        service.rangeBound('2026-10-31T12:00:00Z', 'end').toISOString(),
+      ).toBe('2026-10-31T12:00:00.000Z');
+    });
+  });
 });

@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { jsPDF } from 'jspdf';
+import type { FollowUpMonthlyReport } from '../../follow-up/service/follow-up-monthly-report.service';
 import autoTable, { RowInput } from 'jspdf-autotable';
 import {
   FullEventReport,
@@ -121,6 +122,15 @@ const MUTED = '#8A817C';
 const DANGER = '#C0392B';
 const SUCCESS = '#2E7D32';
 const WHITE = '#FFFFFF';
+const WATCH = '#B26A00';
+
+type StatTone = 'good' | 'watch' | 'bad' | undefined;
+// Fixed meaning colours, the same on every church theme: green going well, amber to watch, red to act on.
+const TONES: Record<'good' | 'watch' | 'bad', { ink: string; fill: string }> = {
+  good: { ink: '#2E7D32', fill: '#EAF5EC' },
+  watch: { ink: WATCH, fill: '#FFF4E3' },
+  bad: { ink: '#B42318', fill: '#FDECEA' },
+};
 
 const PAGE_W = 210;
 const MARGIN = 18;
@@ -202,11 +212,17 @@ export class PdfService {
     );
   }
 
+  // Images print at a few centimetres; a full-size upload made a two-page report several megabytes.
   private async fetchImage(
     url: string,
   ): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
     try {
-      const res = await fetch(url);
+      const res = await fetch(
+        url.replace(
+          /(res\.cloudinary\.com\/[^/]+\/image\/upload\/)(?!c_limit)/,
+          '$1c_limit,w_240,h_240/',
+        ),
+      );
       if (!res.ok) return null;
       const contentType = res.headers.get('content-type') ?? '';
       const format = contentType.includes('png')
@@ -270,7 +286,16 @@ export class PdfService {
     let gridX = 0;
     if (photo) {
       try {
-        doc.addImage(photo.dataUrl, photo.format, MARGIN, y, 24, 24);
+        doc.addImage(
+          photo.dataUrl,
+          photo.format,
+          MARGIN,
+          y,
+          24,
+          24,
+          undefined,
+          'FAST',
+        );
         gridX = 28;
       } catch {
         gridX = 0;
@@ -376,12 +401,11 @@ export class PdfService {
       doc.addPage();
       y = 20;
     }
-    const lines = doc.splitTextToSize(text, CONTENT_W);
-    doc
+    const lines = doc
       .setFont('helvetica', 'normal')
       .setFontSize(9)
-      .setTextColor(MUTED)
-      .text(lines, MARGIN, y);
+      .splitTextToSize(text, CONTENT_W);
+    doc.setTextColor(MUTED).text(lines, MARGIN, y);
     return y + lines.length * 4.5;
   }
 
@@ -419,6 +443,8 @@ export class PdfService {
           24,
           22,
           22,
+          undefined,
+          'FAST',
         );
         y = 56;
       } catch {
@@ -574,6 +600,19 @@ export class PdfService {
       format: 'a4',
     });
     this.drawDepartmentGoalReport(doc, report, branding);
+    return Buffer.from(doc.output('arraybuffer'));
+  }
+
+  async generateFollowUpMonthlyReport(
+    report: FollowUpMonthlyReport,
+  ): Promise<Buffer> {
+    const branding = await this.resolveBranding();
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+    this.drawFollowUpMonthlyReport(doc, report, branding);
     return Buffer.from(doc.output('arraybuffer'));
   }
 
@@ -1803,6 +1842,8 @@ export class PdfService {
           3,
           16,
           16,
+          undefined,
+          'FAST',
         );
         textStartX = MARGIN + 20;
       } catch {
@@ -2191,5 +2232,560 @@ export class PdfService {
       bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
       alternateRowStyles: { fillColor: branding.theme.soft },
     });
+  }
+
+  private drawFollowUpMonthlyReport(
+    doc: jsPDF,
+    r: FollowUpMonthlyReport,
+    branding: PdfBranding,
+  ): void {
+    const theme = branding.theme;
+    const monthName = (m: string) =>
+      new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+    const day = (d: string, weekday = true) =>
+      new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', {
+        ...(weekday && { weekday: 'short' }),
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      });
+    const pctOf = (n: number, of: number) =>
+      of ? `${Math.round((n / of) * 100)}%` : '—';
+
+    let y = this.drawReportCover(
+      doc,
+      branding,
+      'Follow-Up Monthly Report',
+      monthName(r.month),
+    );
+
+    const t = r.totals;
+    const change = r.change;
+    y = this.drawStatCards(doc, y, theme, [
+      {
+        value: String(t.firstTimers),
+        label: 'First-timers',
+        note:
+          change === null
+            ? undefined
+            : `${change >= 0 ? '+' : ''}${change}% on ${monthName(r.recap.month).split(' ')[0]}`,
+        tone: change === null ? undefined : change >= 0 ? 'good' : 'watch',
+      },
+      {
+        value: String(t.wantsToJoinChurch),
+        label: applyWording('Want to join the church', branding.wording),
+        note: t.firstTimers
+          ? `${pctOf(t.wantsToJoinChurch, t.firstTimers)} of first-timers`
+          : undefined,
+      },
+      {
+        value: String(t.wantsToJoinWorkforce),
+        label: 'Want to join the workforce',
+        note: t.firstTimers
+          ? `${pctOf(t.wantsToJoinWorkforce, t.firstTimers)} of first-timers`
+          : undefined,
+      },
+      r.strongestDay
+        ? {
+            value: String(r.strongestDay.count),
+            label: 'Busiest day',
+            note: day(r.strongestDay.date),
+          }
+        : { value: '—', label: 'Busiest day' },
+    ]);
+
+    if (!t.firstTimers)
+      y = this.drawAccountNote(
+        doc,
+        y + 8,
+        `No first-timers were recorded for ${monthName(r.month)}. If cards are still being typed in, set each one's date of visit so it counts in the right month.`,
+      );
+    y = this.drawHighlightBoxes(doc, y + 6, r.highlights);
+
+    const recap = r.recap;
+    y = this.sectionStart(
+      doc,
+      y + 10,
+      `Last month's first-timers: ${monthName(recap.month)}`,
+      4,
+    );
+    if (!recap.wantedToJoin) {
+      y = this.drawAccountNote(
+        doc,
+        y,
+        `${recap.firstTimers} first-timers; none asked to join.`,
+      );
+    } else {
+      y = this.drawAccountNote(
+        doc,
+        y,
+        `${recap.firstTimers} first-timers, ${recap.wantedToJoin} of whom wanted to join. Where those ${recap.wantedToJoin} are now:`,
+      );
+      const toneOf = (o: string): StatTone =>
+        o === 'STILL_ATTENDING' || o === 'JOINED'
+          ? 'good'
+          : o === 'TEMPORARILY_AWAY' || o === 'NO_ANSWER'
+            ? 'watch'
+            : o === 'DECLINED'
+              ? 'bad'
+              : undefined;
+      y = this.drawStatCards(doc, y + 1, theme, [
+        ...recap.outcomes.map((o) => ({
+          value: String(o.count),
+          label: o.label,
+          note: pctOf(o.count, recap.wantedToJoin),
+          tone: toneOf(o.outcome),
+        })),
+        ...(recap.unreachable
+          ? [
+              {
+                value: String(recap.unreachable),
+                label: 'Unreachable',
+                note: pctOf(recap.unreachable, recap.wantedToJoin),
+                tone: 'bad' as StatTone,
+              },
+            ]
+          : []),
+        ...(recap.notYetReached
+          ? [
+              {
+                value: String(recap.notYetReached),
+                label: 'Not yet followed up',
+                note: pctOf(recap.notYetReached, recap.wantedToJoin),
+                tone: 'bad' as StatTone,
+              },
+            ]
+          : []),
+      ]);
+    }
+
+    if (r.byDate.length > 1) {
+      y = this.sectionStart(doc, y + 10, 'First-timers by day', 8);
+      y = this.drawDayChart(
+        doc,
+        y + 2,
+        theme,
+        r.byDate,
+        r.strongestDay?.date,
+        (d) => day(d, false),
+      );
+    }
+
+    if (r.services.length) {
+      y = this.sectionStart(doc, y + 10, 'By service', r.services.length);
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN },
+        head: [['Date', 'Service', 'First-timers', 'Attended to by']],
+        body: r.services.map((s) => [
+          day(s.date),
+          s.eventName ?? '—',
+          String(s.count),
+          s.attendedBy.join(', ') || '—',
+        ]),
+        columnStyles: {
+          2: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
+        },
+        headStyles: {
+          fillColor: theme.brand,
+          textColor: WHITE,
+          fontStyle: 'bold',
+          fontSize: 8.5,
+        },
+        bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: theme.tint },
+      });
+      y = this.tableEnd(doc);
+    }
+
+    const charts: [string, [string, number][]][] = [
+      ...(r.bySource.length
+        ? [
+            [
+              'How they were recorded',
+              r.bySource.map((s): [string, number] => [s.label, s.count]),
+            ] as [string, [string, number][]],
+          ]
+        : []),
+      ...r.fields
+        .filter((f) => f.counts && f.type !== 'YES_NO')
+        .map((f): [string, [string, number][]] => [
+          f.label,
+          f.counts!.map((c): [string, number] => [c.option, c.count]),
+        ]),
+    ];
+    for (const [title, rows] of charts) {
+      y = this.sectionStart(doc, y + 10, title, rows.length);
+      y = this.drawCountTable(doc, y, branding, rows);
+    }
+
+    const yesNo = r.fields.filter((f) => f.type === 'YES_NO');
+    if (yesNo.length) {
+      y = this.sectionStart(doc, y + 10, 'Yes or no questions', yesNo.length);
+      y = this.drawCountTable(
+        doc,
+        y,
+        branding,
+        yesNo.map((f): [string, number] => [
+          `${f.label} (yes)`,
+          f.counts?.[0]?.count ?? 0,
+        ]),
+      );
+    }
+
+    if (r.liked.length) {
+      y = this.sectionStart(
+        doc,
+        y + 10,
+        'What they liked',
+        Math.min(2, Math.ceil(r.liked.length / 2)),
+      );
+      y = this.drawQuoteCards(doc, y + 1, r.liked, theme.accent);
+    }
+    for (const f of r.fields.filter((f) => f.quotes?.length)) {
+      y = this.sectionStart(
+        doc,
+        y + 10,
+        f.label,
+        Math.min(2, Math.ceil(f.quotes!.length / 2)),
+      );
+      y = this.drawQuoteCards(
+        doc,
+        y + 1,
+        f.quotes!,
+        f.key === 'improve' ? WATCH : theme.accent,
+      );
+    }
+
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      doc
+        .setPage(i)
+        .setFont('helvetica', 'normal')
+        .setFontSize(7.5)
+        .setTextColor(MUTED)
+        .text(
+          `${branding.churchName} · Follow-Up Monthly Report · ${monthName(r.month)} · Page ${i} of ${pages}`,
+          PAGE_W / 2,
+          290,
+          { align: 'center' },
+        );
+    }
+  }
+
+  // A full-width band in the church's colours, with the logo, the report's name and its period.
+  private drawReportCover(
+    doc: jsPDF,
+    branding: PdfBranding,
+    title: string,
+    period: string,
+  ): number {
+    const h = 44;
+    doc.setFillColor(branding.theme.brand);
+    doc.rect(0, 0, PAGE_W, h, 'F');
+    let x = MARGIN;
+    if (branding.logoImage) {
+      try {
+        doc.addImage(
+          branding.logoImage.dataUrl,
+          branding.logoImage.format,
+          MARGIN,
+          9,
+          14,
+          14,
+          undefined,
+          'FAST',
+        );
+        x = MARGIN + 18;
+      } catch {
+        x = MARGIN;
+      }
+    }
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(9)
+      .setTextColor(WHITE)
+      .text(branding.churchName, x, 14);
+    if (branding.churchTagline)
+      doc
+        .setFont('helvetica', 'normal')
+        .setFontSize(8)
+        .setTextColor(branding.theme.accent)
+        .text(branding.churchTagline, x, 19);
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(20)
+      .setTextColor(WHITE)
+      .text(title, MARGIN, 34);
+    doc
+      .setFont('helvetica', 'normal')
+      .setFontSize(12)
+      .setTextColor(branding.theme.accent)
+      .text(period, PAGE_W - MARGIN, 34, { align: 'right' });
+    return h + 8;
+  }
+
+  // Horizontal cards: a big number, what it is, and an optional coloured note. Wraps after four.
+  private drawStatCards(
+    doc: jsPDF,
+    y: number,
+    theme: ChurchThemeColors,
+    cards: { value: string; label: string; note?: string; tone?: StatTone }[],
+  ): number {
+    const perRow = 4;
+    const gap = 4;
+    const w = (CONTENT_W - gap * (perRow - 1)) / perRow;
+    const h = 27;
+    cards.forEach((c, i) => {
+      const row = Math.floor(i / perRow);
+      const cx = MARGIN + (i % perRow) * (w + gap);
+      const cy = y + row * (h + gap);
+      const tone = c.tone ? TONES[c.tone] : null;
+      doc.setFillColor(tone?.fill ?? theme.tint);
+      doc.roundedRect(cx, cy, w, h, 2.5, 2.5, 'F');
+      doc.setFillColor(tone?.ink ?? theme.brand);
+      doc.rect(cx, cy + 3, 1.2, h - 6, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(19)
+        .setTextColor(tone?.ink ?? theme.brand)
+        .text(c.value, cx + 5, cy + 11);
+      const label = doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(7.5)
+        .splitTextToSize(c.label, w - 8);
+      doc.setTextColor(DARK).text(label.slice(0, 2), cx + 5, cy + 17);
+      if (c.note)
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(7)
+          .setTextColor(tone?.ink ?? MUTED)
+          .text(c.note, cx + 5, cy + h - 3);
+    });
+    return y + Math.ceil(cards.length / perRow) * (h + gap) - gap;
+  }
+
+  // "Going well" and "Needs attention" side by side, the same height.
+  private drawHighlightBoxes(
+    doc: jsPDF,
+    y: number,
+    h: { good: string[]; watch: string[] },
+  ): number {
+    const gap = 4;
+    const w = (CONTENT_W - gap) / 2;
+    const boxes = [
+      {
+        title: 'Going well',
+        items: h.good,
+        tone: TONES.good,
+        empty: 'Nothing stands out this month.',
+      },
+      {
+        title: 'Needs attention',
+        items: h.watch,
+        tone: TONES.watch,
+        empty: 'Nothing needs attention this month.',
+      },
+    ].map((b) => ({
+      ...b,
+      lines: (b.items.length ? b.items : [b.empty]).map(
+        (t) =>
+          doc
+            .setFont('helvetica', 'normal')
+            .setFontSize(8.5)
+            .splitTextToSize(t, w - 14) as string[],
+      ),
+    }));
+    const height =
+      Math.max(
+        ...boxes.map(
+          (b) => 14 + b.lines.reduce((n, l) => n + l.length * 4 + 2, 0),
+        ),
+      ) + 2;
+    if (y + height > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    boxes.forEach((b, i) => {
+      const x = MARGIN + i * (w + gap);
+      doc.setFillColor(b.tone.fill);
+      doc.roundedRect(x, y, w, height, 2.5, 2.5, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(10)
+        .setTextColor(b.tone.ink)
+        .text(b.title, x + 5, y + 8);
+      let ly = y + 14.5;
+      b.lines.forEach((lines) => {
+        if (b.items.length) {
+          doc.setFillColor(b.tone.ink);
+          doc.circle(x + 6.5, ly - 1.2, 0.9, 'F');
+        }
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .setTextColor(DARK)
+          .text(lines, x + 10, ly);
+        ly += lines.length * 4 + 2;
+      });
+    });
+    return y + height;
+  }
+
+  // Vertical bars per day; the busiest day in the church's main colour.
+  private drawDayChart(
+    doc: jsPDF,
+    y: number,
+    theme: ChurchThemeColors,
+    days: { date: string; count: number }[],
+    busiest: string | undefined,
+    label: (date: string) => string,
+  ): number {
+    const chartH = 42;
+    const max = Math.max(1, ...days.map((d) => d.count));
+    const slot = CONTENT_W / days.length;
+    const barW = Math.min(16, slot * 0.6);
+    doc
+      .setDrawColor(theme.accent)
+      .setLineWidth(0.2)
+      .line(MARGIN, y + chartH, MARGIN + CONTENT_W, y + chartH);
+    days.forEach((d, i) => {
+      const bh = Math.max(0.8, ((chartH - 8) * d.count) / max);
+      const x = MARGIN + i * slot + (slot - barW) / 2;
+      doc.setFillColor(d.date === busiest ? theme.brand : theme.accent);
+      doc.roundedRect(x, y + chartH - bh, barW, bh, 1, 1, 'F');
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(8)
+        .setTextColor(DARK)
+        .text(String(d.count), x + barW / 2, y + chartH - bh - 1.5, {
+          align: 'center',
+        });
+      doc
+        .setFont('helvetica', 'normal')
+        .setFontSize(7)
+        .setTextColor(MUTED)
+        .text(label(d.date), x + barW / 2, y + chartH + 4.5, {
+          align: 'center',
+        });
+    });
+    return y + chartH + 6;
+  }
+
+  // Two columns of quote cards with the person's first name.
+  private drawQuoteCards(
+    doc: jsPDF,
+    y: number,
+    quotes: { name: string; text: string }[],
+    edge: string,
+  ): number {
+    const gap = 4;
+    const w = (CONTENT_W - gap) / 2;
+    for (let i = 0; i < quotes.length; i += 2) {
+      const pair = quotes.slice(i, i + 2).map((q) => ({
+        q,
+        lines: doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .splitTextToSize(`“${q.text}”`, w - 10) as string[],
+      }));
+      const h = Math.max(...pair.map((p) => p.lines.length)) * 4 + 11;
+      if (y + h > 282) {
+        doc.addPage();
+        y = 20;
+      }
+      pair.forEach((p, j) => {
+        const x = MARGIN + j * (w + gap);
+        doc.setFillColor('#FAFAF8');
+        doc.roundedRect(x, y, w, h, 2, 2, 'F');
+        doc.setFillColor(edge);
+        doc.rect(x, y + 2, 1.2, h - 4, 'F');
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(8.5)
+          .setTextColor(DARK)
+          .text(p.lines, x + 5, y + 6);
+        doc
+          .setFont('helvetica', 'bold')
+          .setFontSize(7.5)
+          .setTextColor(MUTED)
+          .text(p.q.name, x + 5, y + h - 3);
+      });
+      y += h + gap;
+    }
+    return y - gap;
+  }
+
+  // Starts a section on a new page when its title and first rows (or the whole of a short table) won't fit.
+  private sectionStart(
+    doc: jsPDF,
+    y: number,
+    title: string,
+    rows: number,
+  ): number {
+    const needed = 14 + (rows <= 8 ? rows : 3) * 7;
+    if (y + needed > 280) {
+      doc.addPage();
+      y = 20;
+    }
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(12)
+      .setTextColor(DARK)
+      .text(title, MARGIN, y);
+    return y + 5;
+  }
+
+  // Label, count, and a bar on a light track, scaled to the largest count.
+  private drawCountTable(
+    doc: jsPDF,
+    y: number,
+    branding: PdfBranding,
+    rows: [string, number][],
+  ): number {
+    const max = Math.max(1, ...rows.map(([, n]) => n));
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      body: rows.map(([label, n]) => [label, String(n), '']),
+      columnStyles: {
+        0: { cellWidth: CONTENT_W * 0.42 },
+        1: { cellWidth: 16, halign: 'right', fontStyle: 'bold' },
+      },
+      bodyStyles: {
+        fontSize: 8.5,
+        textColor: DARK,
+        fillColor: WHITE,
+        cellPadding: 2.2,
+      },
+      alternateRowStyles: { fillColor: '#FAFAF8' },
+      didDrawCell: (data) => {
+        if (data.section !== 'body' || data.column.index !== 2) return;
+        const n = rows[data.row.index][1];
+        const full = data.cell.width - 8;
+        const top = data.cell.y + data.cell.height / 2 - 1.6;
+        doc.setFillColor(branding.theme.tint);
+        doc.roundedRect(data.cell.x + 4, top, full, 3.2, 1.6, 1.6, 'F');
+        const w = (full * n) / max;
+        if (w <= 0) return;
+        doc.setFillColor(
+          n === max ? branding.theme.brand : branding.theme.accent,
+        );
+        doc.roundedRect(
+          data.cell.x + 4,
+          top,
+          Math.max(w, 3.2),
+          3.2,
+          1.6,
+          1.6,
+          'F',
+        );
+      },
+    });
+    return this.tableEnd(doc);
   }
 }

@@ -302,6 +302,11 @@ export type AuditAction =
   | 'REPORT_EXPORTED'
   // Rites of passage / membership anniversary
   | 'MEMBERSHIP_ANNIVERSARY_GREETED'
+  | 'ANNIVERSARY_SETTINGS_UPDATED'
+  | 'FIRST_TIMER_FIELD_CREATED'
+  | 'FIRST_TIMER_FIELD_UPDATED'
+  | 'FIRST_TIMER_FIELD_DELETED'
+  | 'FIRST_TIMER_FIELDS_REORDERED'
   // Service ratings
   | 'SERVICE_RATING_MODERATED'
   // Volunteer marketplace

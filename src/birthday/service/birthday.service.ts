@@ -27,6 +27,7 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { DateService } from '../../utility/service/date.service';
 
 export interface BirthdayCelebrant {
   id: string;
@@ -59,6 +60,7 @@ export class BirthdayService implements OnApplicationBootstrap {
     private readonly sanitizationService: SanitizationService,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
+    private readonly dateService: DateService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
@@ -126,8 +128,7 @@ export class BirthdayService implements OnApplicationBootstrap {
 
           if (birthdayMembers.length === 0) return;
 
-          const endOfDay = new Date(today);
-          endOfDay.setHours(23, 59, 59, 999);
+          const endOfDay = this.dateService.endOfDay();
 
           for (const member of birthdayMembers) {
             try {

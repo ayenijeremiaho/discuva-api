@@ -19297,6 +19297,87 @@
       ]
     },
     {
+      "name": "Membership Anniversaries (Admin)",
+      "item": [
+        {
+          "name": "List Anniversaries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/anniversaries?days=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "anniversaries"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "Admin (members:read). Active members whose membership anniversary is today (daysAway 0) or within the next `days` days (0–365, default 7), soonest first. Each row: id, firstname, lastname, email, phoneNumber, photoUrl, dateJoinedChurch, years (the anniversary being reached), daysAway."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Anniversary Post Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/anniversaries/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "anniversaries",
+                "settings"
+              ]
+            },
+            "description": "Admin (members:read). { postEnabled, title, body }. Defaults: post on, title 'Celebrating {years} with {first_name}!'. Placeholders: {years} ('1 year' / '5 years'), {first_name}, {full_name}."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Anniversary Post Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/anniversaries/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "anniversaries",
+                "settings"
+              ]
+            },
+            "description": "Admin (announcements:write). Any of postEnabled, title (≤150), body (≤1000); blank wording keeps the current text. Turning the post off still sends the anniversary email (its own email category).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postEnabled\": true,\n  \"title\": \"Celebrating {years} with {first_name}!\",\n  \"body\": \"Today marks {years} since {full_name} joined our church family.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Event Reminders",
       "description": "Per-slot, configurable reminders. Each reminder fires once (before the slot's startTime) via a 15-minute cron and creates an in-app announcement plus sends a batch email. ADMIN only. Audience: ALL | WORKERS_ONLY | DEPARTMENT (INDIVIDUAL is rejected). Preset intervals: 15m | 30m | 1h | 3h | 24h | 48h.",
       "item": [
@@ -22129,7 +22210,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\"\n}",
+              "raw": "{\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\",\n  \"answers\": {\n    \"{{cardFieldId}}\": \"Friend\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -22203,6 +22284,26 @@
               "body": "[]"
             }
           ]
+        },
+        {
+          "name": "Card Fields",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/public/card-fields",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "public",
+                "card-fields"
+              ]
+            },
+            "description": "No auth (module must be on). The church's switched-on card fields: id, key, label, type, options, required. Send answers as `answers: { [fieldId]: value }` when creating a first-timer."
+          },
+          "response": []
         }
       ]
     },
@@ -22222,7 +22323,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"enjoyedAboutChurch\": \"The worship was amazing\",\n  \"wantsToJoinWorkforce\": false,\n  \"visitedEventId\": \"{{eventId}}\"\n}",
+              "raw": "{\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"enjoyedAboutChurch\": \"The worship was amazing\",\n  \"wantsToJoinWorkforce\": false,\n  \"visitedEventId\": \"{{eventId}}\",\n  \"answers\": {\n    \"{{cardFieldId}}\": \"Friend\"\n  },\n  \"visitedOn\": \"2026-10-04\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -22616,7 +22717,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"Tola\",\n  \"lastname\": \"Adebayo\",\n  \"phone\": \"08022223333\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"wantsToJoinWorkforce\": true,\n  \"visitedEventId\": \"{{eventId}}\"\n}",
+              "raw": "{\n  \"firstname\": \"Tola\",\n  \"lastname\": \"Adebayo\",\n  \"phone\": \"08022223333\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"wantsToJoinWorkforce\": true,\n  \"visitedEventId\": \"{{eventId}}\",\n  \"answers\": {\n    \"{{cardFieldId}}\": \"Friend\"\n  },\n  \"visitedOn\": \"2026-10-04\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -23393,6 +23494,205 @@
               ]
             },
             "description": "Admin (FOLLOW_UP_WRITE). Undo a wrong match; the convert returns to Evangelism, unassigned."
+          },
+          "response": []
+        },
+        {
+          "name": "List Card Fields",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/card-fields",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "card-fields"
+              ]
+            },
+            "description": "FOLLOW_UP_READ. Every field on the church's first-timer card, switched on or off, in order. Ready-made fields have a `key`."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Card Field",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/card-fields",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "card-fields"
+              ]
+            },
+            "description": "FOLLOW_UP_WRITE. A church's own field, switched on. type: TEXT | LONG_TEXT | CHOICE | MULTI_CHOICE | YES_NO | DATE | DAY_MONTH. Choices need 2+ options. Up to 40 fields.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Which service?\",\n  \"type\": \"CHOICE\",\n  \"options\": [\n    \"First\",\n    \"Second\",\n    \"Third\"\n  ],\n  \"required\": false,\n  \"inReport\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reorder Card Fields",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/card-fields/order",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "card-fields",
+                "order"
+              ]
+            },
+            "description": "FOLLOW_UP_WRITE. Field ids in the new order; any left out keep their relative order after these.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{cardFieldId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Card Field",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/card-fields/{{cardFieldId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "card-fields",
+                "{{cardFieldId}}"
+              ]
+            },
+            "description": "FOLLOW_UP_WRITE. Any of label, options (choices only), enabled, required, inReport.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"required\": false,\n  \"inReport\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Card Field",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/card-fields/{{cardFieldId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "card-fields",
+                "{{cardFieldId}}"
+              ]
+            },
+            "description": "FOLLOW_UP_WRITE. The church's own fields only (ready-made ones are switched off instead). Answers already given stay on each first-timer."
+          },
+          "response": []
+        },
+        {
+          "name": "Monthly Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/report/monthly?month=2026-10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "report",
+                "monthly"
+              ],
+              "query": [
+                {
+                  "key": "month",
+                  "value": "2026-10"
+                }
+              ]
+            },
+            "description": "FOLLOW_UP_READ. One month by visit date: totals, by date, busiest day, by service with who attended to them, by source, what they liked, each in-report card field (counts or quotes), and a recap of last month's first-timers who wanted to join, by outcome."
+          },
+          "response": []
+        },
+        {
+          "name": "Monthly Report PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/report/monthly.pdf?month=2026-10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "report",
+                "monthly.pdf"
+              ],
+              "query": [
+                {
+                  "key": "month",
+                  "value": "2026-10"
+                }
+              ]
+            },
+            "description": "FOLLOW_UP_READ. The same report as a branded PDF download."
           },
           "response": []
         }

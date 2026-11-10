@@ -15,6 +15,8 @@ import { FirstTimerSourceEnum } from '../enums/follow-up.enum';
 import { FollowUpTask } from './follow-up-task.entity';
 import { FirstTimerVisit } from './first-timer-visit.entity';
 
+export type FirstTimerAnswer = string | boolean | string[];
+
 @Entity({ name: 'first_timers' })
 export class FirstTimer extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -77,6 +79,14 @@ export class FirstTimer extends BaseEntity {
     default: () => "'{}'",
   })
   dismissedConvertIds: string[];
+
+  // The day they visited, church time; the monthly report counts by this, not by when the card was typed in.
+  @Column({ name: 'visited_on', type: 'date' })
+  visitedOn: string;
+
+  // Answers to the church's own card fields, keyed by FirstTimerField id.
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  answers: Record<string, FirstTimerAnswer>;
 
   @OneToOne(() => FollowUpTask, (task) => task.firstTimer)
   followUpTask: FollowUpTask;

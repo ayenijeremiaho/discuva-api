@@ -31,6 +31,9 @@ import { Convert } from '../evangelism/entity/convert.entity';
 import { Member } from '../member/entity/member.entity';
 import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.entity';
 import { FirstTimerConvertService } from './service/first-timer-convert.service';
+import { FirstTimerField } from './entity/first-timer-field.entity';
+import { FirstTimerCardService } from './service/first-timer-card.service';
+import { FollowUpMonthlyReportService } from './service/follow-up-monthly-report.service';
 
 @Module({
   imports: [
@@ -39,6 +42,7 @@ import { FirstTimerConvertService } from './service/first-timer-convert.service'
       ChurchSetting,
       FirstTimer,
       FirstTimerVisit,
+      FirstTimerField,
       FollowUpTask,
       FollowUpNote,
       WorkerProfile,
@@ -83,6 +87,8 @@ import { FirstTimerConvertService } from './service/first-timer-convert.service'
   providers: [
     FollowUpService,
     FirstTimerConvertService,
+    FirstTimerCardService,
+    FollowUpMonthlyReportService,
     PostEventProcessor,
     FollowUpScheduler,
   ],

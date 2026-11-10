@@ -14,6 +14,7 @@ import { RequiresModule } from '../../church-settings/decorator/requires-module.
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { FollowUpService } from '../service/follow-up.service';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
+import { FirstTimerCardService } from '../service/first-timer-card.service';
 
 // No login required — this is reached from the member app's signup screen
 // before an account exists, by someone who may never create one at all
@@ -25,7 +26,17 @@ import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
 @UseGuards(ModuleEnabledGuard)
 @Controller('follow-up/public')
 export class FollowUpPublicController {
-  constructor(private readonly followUpService: FollowUpService) {}
+  constructor(
+    private readonly followUpService: FollowUpService,
+    private readonly cardService: FirstTimerCardService,
+  ) {}
+
+  // The church's switched-on card fields, for the sign-up page and the worker's first-timer form.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Get('card-fields')
+  cardFields() {
+    return this.cardService.enabledFields();
+  }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.CREATED)
