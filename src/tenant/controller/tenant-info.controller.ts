@@ -225,6 +225,8 @@ export class TenantInfoController {
       address: tenant.address,
       supportEmail: tenant.supportEmail,
       pwaShortName: tenant.pwaShortName,
+      // Set when the church is in a network, so the member app knows to load the branch list.
+      networkRootId: tenant.networkRootId,
       themePreset: tenant.themePreset,
       previousThemePreset: tenant.previousThemePreset,
       currency: tenant.currency,
