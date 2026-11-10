@@ -285,7 +285,13 @@ export class AccountSignInService {
     const links = await this.accounts.linksOf(account.id);
     const tenants = await this.tenantRepo.find({
       where: { id: In(links.map((l) => l.tenantId)), isActive: true },
-      select: { id: true, name: true, subdomain: true, logoUrl: true },
+      select: {
+        id: true,
+        name: true,
+        subdomain: true,
+        logoUrl: true,
+        networkRootId: true,
+      },
     });
     const current = this.cls.get('tenantId');
     return tenants.map((t) => ({
@@ -293,8 +299,33 @@ export class AccountSignInService {
       name: t.name,
       subdomain: t.subdomain,
       logoUrl: t.logoUrl,
+      networkRootId: t.networkRootId,
       current: t.id === current,
     }));
+  }
+
+  // Where this person belongs in the current church's network, so the network app can open their home branch.
+  async networkHome(memberId: string): Promise<{
+    networkRootId: string | null;
+    home: { tenantId: string; subdomain: string } | null;
+  }> {
+    const account = await this.movedAccount(memberId);
+    const here = await this.tenantRepo.findOne({
+      where: { id: this.cls.get('tenantId') },
+      select: { id: true, networkRootId: true },
+    });
+    if (!here?.networkRootId) return { networkRootId: null, home: null };
+    const homeId = await this.accounts.homeIn(account.id, here.networkRootId);
+    const home = homeId
+      ? await this.tenantRepo.findOne({
+          where: { id: homeId, isActive: true },
+          select: { id: true, subdomain: true },
+        })
+      : null;
+    return {
+      networkRootId: here.networkRootId,
+      home: home ? { tenantId: home.id, subdomain: home.subdomain } : null,
+    };
   }
 
   async switchChurch(

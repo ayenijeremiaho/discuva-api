@@ -34,6 +34,7 @@ const codes = {
   verifyCode: jest.fn().mockResolvedValue(undefined),
 };
 const accounts = {
+  homeIn: jest.fn(),
   isOn: jest.fn(),
   isProfileOn: jest.fn().mockResolvedValue(false),
   linkHere: jest.fn(),
@@ -493,6 +494,29 @@ describe('AccountSignInService', () => {
         { tenantId: 't2', memberId: 'm1' },
         { tenantId: 't5', memberId: 'm5' },
       ]);
+    });
+
+    it("finds the person's home branch in this church's network", async () => {
+      tenantRepo.findOne
+        .mockResolvedValueOnce({ id: ctx.tenantId, networkRootId: 'abc' })
+        .mockResolvedValueOnce({ id: 't5', subdomain: 'abc-ikeja' });
+      accounts.homeIn.mockResolvedValue('t5');
+      await expect(service.networkHome('m1')).resolves.toEqual({
+        networkRootId: 'abc',
+        home: { tenantId: 't5', subdomain: 'abc-ikeja' },
+      });
+      expect(accounts.homeIn).toHaveBeenCalledWith(account.id, 'abc');
+    });
+
+    it('has no home outside a network', async () => {
+      tenantRepo.findOne.mockResolvedValueOnce({
+        id: ctx.tenantId,
+        networkRootId: null,
+      });
+      await expect(service.networkHome('m1')).resolves.toEqual({
+        networkRootId: null,
+        home: null,
+      });
     });
 
     it('refuses a church the account is not linked to', async () => {

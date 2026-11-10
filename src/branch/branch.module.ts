@@ -14,6 +14,7 @@ import { BranchRollupService } from './service/branch-rollup.service';
 import { NetworkService } from './service/network.service';
 import { NetworkController } from './controller/network.controller';
 import { PlatformNetworkController } from './controller/platform-network.controller';
+import { PublicNetworkController } from './controller/public-network.controller';
 import { TenantModule } from '../tenant/tenant.module';
 import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
 
@@ -34,7 +35,12 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     TenantTypeOrmModule.forFeature([Member, Attendance, TitheRecord]),
     TenantModule,
   ],
-  controllers: [BranchController, NetworkController, PlatformNetworkController],
+  controllers: [
+    BranchController,
+    NetworkController,
+    PublicNetworkController,
+    PlatformNetworkController,
+  ],
   providers: [BranchRollupService, NetworkService, BranchRollupScheduler],
   exports: [NetworkService],
 })

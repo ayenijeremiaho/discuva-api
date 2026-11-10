@@ -15,6 +15,7 @@ import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity';
 import { DiscuvaAccountCodeService } from './discuva-account-code.service';
 import { Admin } from '../../admin/entity/admin.entity';
+import { NetworkHome } from '../entity/network-home.entity';
 
 const qb = (result: unknown) => ({
   addSelect: jest.fn().mockReturnThis(),
@@ -84,6 +85,17 @@ const adult = {
   discuvaAccountId: null,
 } as unknown as Member;
 
+const homeQb = {
+  insert: jest.fn().mockReturnThis(),
+  values: jest.fn().mockReturnThis(),
+  orIgnore: jest.fn().mockReturnThis(),
+  execute: jest.fn().mockResolvedValue(undefined),
+};
+const homeRepo = {
+  findOne: jest.fn().mockResolvedValue(null),
+  createQueryBuilder: jest.fn(() => homeQb),
+};
+
 describe('DiscuvaAccountService', () => {
   let service: DiscuvaAccountService;
 
@@ -106,6 +118,7 @@ describe('DiscuvaAccountService', () => {
         { provide: getRepositoryToken(DiscuvaAccount), useValue: accountRepo },
         { provide: getRepositoryToken(DiscuvaAccountLink), useValue: linkRepo },
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
+        { provide: getRepositoryToken(NetworkHome), useValue: homeRepo },
         { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: getRepositoryToken(Admin), useValue: adminRepo },
         { provide: UtilityService, useValue: utilityService },
@@ -625,6 +638,29 @@ describe('DiscuvaAccountService', () => {
       await service.isFrozen(moved);
       // The second read happens inside resetDevices, after its write, and is the one reused.
       expect(accountRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('homeIn', () => {
+    it('uses a saved home branch', async () => {
+      homeRepo.findOne.mockResolvedValueOnce({ homeTenantId: 'ikeja' });
+      await expect(service.homeIn('acc-1', 'abc')).resolves.toBe('ikeja');
+    });
+
+    it('falls back to the first church joined in that network, and remembers it', async () => {
+      homeRepo.findOne.mockResolvedValueOnce(null);
+      linkRepo.find.mockResolvedValueOnce([
+        { tenantId: 'elsewhere', linkedAt: new Date('2025-01-01') },
+        { tenantId: 'lekki', linkedAt: new Date('2025-02-01') },
+        { tenantId: 'ikeja', linkedAt: new Date('2025-03-01') },
+      ]);
+      tenantRepo.find.mockResolvedValueOnce([{ id: 'ikeja' }, { id: 'lekki' }]);
+      await expect(service.homeIn('acc-1', 'abc')).resolves.toBe('lekki');
+      expect(homeQb.values).toHaveBeenCalledWith({
+        accountId: 'acc-1',
+        networkRootId: 'abc',
+        homeTenantId: 'lekki',
+      });
     });
   });
 });

@@ -23,6 +23,7 @@ import { AccountDeletionService } from './service/account-deletion.service';
 import { AccountDeletionProcessor } from './processor/account-deletion.processor';
 import { ACCOUNT_DELETION_QUEUE } from './processor/account-deletion.queue';
 import { BullModule } from '@nestjs/bull';
+import { NetworkHome } from './entity/network-home.entity';
 
 // Global so member and auth code can reach it without an import cycle through MemberModule.
 @Global()
@@ -35,6 +36,7 @@ import { BullModule } from '@nestjs/bull';
       DiscuvaProfile,
       DiscuvaMilestone,
       DiscuvaPhotoRemoval,
+      NetworkHome,
       Tenant,
     ]),
     BullModule.registerQueue({ name: ACCOUNT_DELETION_QUEUE }),

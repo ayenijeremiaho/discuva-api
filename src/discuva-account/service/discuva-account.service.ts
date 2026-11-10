@@ -27,6 +27,7 @@ import { PlatformSettingsService } from '../../platform-admin/service/platform-s
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { UtilityService } from '../../utility/service/utility.service';
+import { NetworkHome } from '../entity/network-home.entity';
 
 export enum AccountMode {
   OFF = 0,
@@ -56,6 +57,8 @@ export class DiscuvaAccountService {
     private readonly utilityService: UtilityService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @InjectRepository(NetworkHome)
+    private readonly homeRepo: Repository<NetworkHome>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(Admin)
@@ -424,6 +427,38 @@ export class DiscuvaAccountService {
       ['tenantId', 'memberId'],
     );
     await this.memberRepo.update(memberId, { discuvaAccountId: accountId });
+  }
+
+  // The person's home branch in a network. Until one is set, it's the first church they joined there.
+  async homeIn(
+    accountId: string,
+    networkRootId: string,
+  ): Promise<string | null> {
+    const home = await this.homeRepo.findOne({
+      where: { accountId, networkRootId },
+      select: { homeTenantId: true },
+    });
+    if (home) return home.homeTenantId;
+    const links = await this.linksOf(accountId);
+    if (!links.length) return null;
+    const inNetwork = await this.tenantRepo.find({
+      where: {
+        id: In(links.map((l) => l.tenantId)),
+        networkRootId,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    const ids = new Set(inNetwork.map((t) => t.id));
+    const first = links.find((l) => ids.has(l.tenantId));
+    if (!first) return null;
+    await this.homeRepo
+      .createQueryBuilder()
+      .insert()
+      .values({ accountId, networkRootId, homeTenantId: first.tenantId })
+      .orIgnore()
+      .execute();
+    return first.tenantId;
   }
 
   async linkHere(memberId: string): Promise<DiscuvaAccountLink | null> {

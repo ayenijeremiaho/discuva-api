@@ -23,6 +23,7 @@ import { DiscuvaAccountService } from '../../discuva-account/service/discuva-acc
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { CacheService } from '../../utility/service/cache.service';
 import { NetworkLevel } from '../entity/network-level.entity';
 import { NetworkMove } from '../entity/network-move.entity';
 import { TenantRollup } from '../entity/tenant-rollup.entity';
@@ -30,6 +31,21 @@ import { AddBranchDto } from '../dto/network.dto';
 
 const MAX_ADDRESS_TRIES = 20;
 const RECENT_MOVES = 5;
+const PUBLIC_TTL_SECONDS = 300;
+const publicKey = (rootId: string) => `network-public:${rootId}`;
+
+export interface PublicNetwork {
+  root: {
+    tenantId: string;
+    name: string;
+    subdomain: string;
+    logoUrl: string | null;
+  };
+  churches: Pick<
+    NetworkNode,
+    'id' | 'name' | 'label' | 'path' | 'subdomain' | 'depth' | 'levelName'
+  >[];
+}
 
 export interface NetworkNode {
   id: string;
@@ -111,6 +127,7 @@ export class NetworkService {
     private readonly accounts: DiscuvaAccountService,
     private readonly settings: PlatformSettingsService,
     private readonly auditLog: AuditLogService,
+    private readonly cache: CacheService,
     private readonly cls: ClsService<AppClsStore>,
   ) {}
 
@@ -270,6 +287,7 @@ export class NetworkService {
       TenantOnboardingActorType.SELF_SERVE,
       { actorId: admin.id, metadata: { parentTenantId: current.id } },
     );
+    this.cache.delGlobal(publicKey(rootId));
     this.auditLog.log('NETWORK_BRANCH_ADDED', {
       targetId: branch.id,
       targetName: dto.name,
@@ -337,6 +355,7 @@ export class NetworkService {
         movedByMemberId: memberId,
       }),
     );
+    this.cache.delGlobal(publicKey(tree.rootId));
     this.auditLog.log('NETWORK_CHURCH_MOVED', {
       targetId: church.id,
       targetName: church.name,
@@ -359,7 +378,52 @@ export class NetworkService {
       .map((name, i) => ({ networkRootId: current.id, depth: i + 2, name }))
       .filter((r) => r.name);
     if (rows.length) await this.levelRepo.save(rows);
+    this.cache.delGlobal(publicKey(current.id));
     return this.levelList(await this.levelNames(current.id), maxLevels);
+  }
+
+  // Public: the network the current church belongs to, for the network app's branch picker. Names and addresses only.
+  async publicNetwork(): Promise<{ network: PublicNetwork | null }> {
+    if (!(await this.isAvailable())) return { network: null };
+    const current = await this.currentTenant();
+    if (!current.networkRootId) return { network: null };
+    const key = publicKey(current.networkRootId);
+    const cached = await this.cache.getGlobal<PublicNetwork>(key);
+    if (cached) return { network: cached };
+
+    const [tree, levels, root] = await Promise.all([
+      this.loadTree(current.networkRootId),
+      this.levelNames(current.networkRootId),
+      this.tenantRepo.findOne({
+        where: { id: current.networkRootId },
+        select: { id: true, name: true, subdomain: true, logoUrl: true },
+      }),
+    ]);
+    if (!root) return { network: null };
+    const network: PublicNetwork = {
+      root: {
+        tenantId: root.id,
+        name: root.name,
+        subdomain: root.subdomain,
+        logoUrl: root.logoUrl,
+      },
+      churches: this.subtreeIds(tree, root.id)
+        .filter((id) => tree.byId.get(id)!.isActive)
+        .map((id) => {
+          const n = this.toNode(tree, id, levels);
+          return {
+            id: n.id,
+            name: n.name,
+            label: n.label,
+            path: n.path,
+            subdomain: n.subdomain,
+            depth: n.depth,
+            levelName: n.levelName,
+          };
+        }),
+    };
+    this.cache.setGlobal(key, network, PUBLIC_TTL_SECONDS);
+    return { network };
   }
 
   // Console: every network, with its size and depth. Structure and figures only, never anyone's details.

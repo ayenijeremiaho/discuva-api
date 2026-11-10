@@ -261,6 +261,12 @@ export class AccountController {
     return this.accountSignIn.churches(req.user.id);
   }
 
+  @Get('account/network-home')
+  networkHome(@Request() req: any) {
+    this.assertMemberApp(req);
+    return this.accountSignIn.networkHome(req.user.id);
+  }
+
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('account/switch')

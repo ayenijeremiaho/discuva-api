@@ -72,6 +72,10 @@ describe('NetworkService', () => {
   const notOwner = { id: 'admin-2', isOwner: false } as never;
 
   const tenantRepo = {
+    findOne: jest.fn(
+      async ({ where }: { where: { id: string } }) =>
+        rows.find((r) => r.id === where.id) ?? null,
+    ),
     find: jest.fn(async ({ where }: { where: { networkRootId: string } }) =>
       rows.filter((r) => r.networkRootId === where.networkRootId),
     ),
@@ -129,6 +133,11 @@ describe('NetworkService', () => {
   const accounts = { readModeOn: jest.fn().mockResolvedValue(true) };
   const settings = { getNumber: jest.fn().mockResolvedValue(5) };
   const auditLog = { log: jest.fn() };
+  const cache = {
+    getGlobal: jest.fn().mockResolvedValue(undefined),
+    setGlobal: jest.fn(),
+    delGlobal: jest.fn(),
+  };
   const cls = { get: jest.fn(() => current) };
   const service = new NetworkService(
     tenantRepo as never,
@@ -140,6 +149,7 @@ describe('NetworkService', () => {
     accounts as never,
     settings as never,
     auditLog as never,
+    cache as never,
     cls as never,
   );
 
@@ -303,6 +313,40 @@ describe('NetworkService', () => {
       await expect(
         service.moveChurch(owner, 'ikeja', 'abuja', 'm'),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('publicNetwork', () => {
+    it("lists the network's churches for the app's picker, from any church in it, and caches it", async () => {
+      current = 'ikeja';
+      const { network } = await service.publicNetwork();
+      expect(network?.root).toEqual(
+        expect.objectContaining({ tenantId: 'abc', subdomain: 'abc' }),
+      );
+      expect(network?.churches.map((c) => c.path)).toEqual([
+        'ABC',
+        'ABC · Abuja',
+        'ABC · Lagos',
+        'ABC · Lagos · Ikeja',
+      ]);
+      expect(cache.setGlobal).toHaveBeenCalledWith(
+        'network-public:abc',
+        network,
+        300,
+      );
+    });
+
+    it('is empty outside a network or with the switch off', async () => {
+      rows = [church({ id: 'solo' })];
+      current = 'solo';
+      await expect(service.publicNetwork()).resolves.toEqual({ network: null });
+      accounts.readModeOn.mockResolvedValue(false);
+      await expect(service.publicNetwork()).resolves.toEqual({ network: null });
+    });
+
+    it('is cleared when a church moves', async () => {
+      await service.moveChurch(owner, 'ikeja', 'abuja', 'm');
+      expect(cache.delGlobal).toHaveBeenCalledWith('network-public:abc');
     });
   });
 

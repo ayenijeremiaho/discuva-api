@@ -42340,6 +42340,25 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Public Network (branch picker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/public",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "public"
+              ]
+            },
+            "description": "No auth; send X-Tenant-Subdomain. The network this church belongs to: the top church and every active church with its path, for the network app's branch picker. Null outside a network or with networks off."
+          },
+          "response": []
         }
       ]
     },
@@ -47060,6 +47079,26 @@
               }
             },
             "description": "Registers this church app's phone after the right code and signs in (same response as login)."
+          },
+          "response": []
+        },
+        {
+          "name": "Network Home",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/network-home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "network-home"
+              ]
+            },
+            "description": "Member app. The signed-in person's home branch in this church's network, so the network app can open it. Until set, it's the first church they joined there."
           },
           "response": []
         }
