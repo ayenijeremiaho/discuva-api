@@ -14,6 +14,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { GuestService } from './guest.service';
+import { MilestoneService } from '../../discuva-account/service/milestone.service';
 
 const makeQb = () => ({
   where: jest.fn().mockReturnThis(),
@@ -98,6 +99,10 @@ const mockGuestService = {
   getById: jest.fn(),
 };
 
+const mockMilestones = {
+  recordClassCompletions: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('ClassesService', () => {
   let service: ClassesService;
 
@@ -126,6 +131,7 @@ describe('ClassesService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: GuestService, useValue: mockGuestService },
+        { provide: MilestoneService, useValue: mockMilestones },
       ],
     }).compile();
 
@@ -592,6 +598,9 @@ describe('ClassesService', () => {
       expect(result.status).toBe(EnrollmentStatusEnum.COMPLETED);
       expect(result.completedAt).not.toBeNull();
       expect(result.cancelledAt).toBeNull();
+      expect(mockMilestones.recordClassCompletions).toHaveBeenCalledWith([
+        'enroll-1',
+      ]);
     });
 
     it('should set cancelledAt when status is CANCELLED', async () => {
@@ -1559,9 +1568,11 @@ describe('ClassesService', () => {
   describe('closeClass', () => {
     const updateQb = () => {
       const b: Record<string, jest.Mock> = {};
-      for (const m of ['update', 'set', 'where', 'andWhere'])
+      for (const m of ['update', 'set', 'where', 'andWhere', 'returning'])
         b[m] = jest.fn().mockReturnValue(b);
-      b.execute = jest.fn().mockResolvedValue({ affected: 2 });
+      b.execute = jest
+        .fn()
+        .mockResolvedValue({ affected: 2, raw: [{ id: 'e1' }, { id: 'e2' }] });
       return b;
     };
 
@@ -1578,6 +1589,10 @@ describe('ClassesService', () => {
         closedEnrollments: 2,
       });
       expect(qb.andWhere).toHaveBeenCalledTimes(1);
+      expect(mockMilestones.recordClassCompletions).toHaveBeenCalledWith([
+        'e1',
+        'e2',
+      ]);
       expect(mockClassRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'CLOSED' }),
       );

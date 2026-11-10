@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { profilesOffMock } from '../../discuva-account/testing/profiles-off.mock';
 
 describe('NotificationPreferencesService', () => {
   const updateQb: Record<string, jest.Mock> = {};
@@ -15,12 +16,14 @@ describe('NotificationPreferencesService', () => {
   const categorySettings = { isEnabled: jest.fn(), isPushEnabled: jest.fn() };
   const planFeatures = { gateReason: jest.fn() };
   const cls = { get: jest.fn().mockReturnValue('tenant-1') };
+  const profiles = profilesOffMock();
   const service = new NotificationPreferencesService(
     memberRepo as never,
     churchSettings as never,
     categorySettings as never,
     planFeatures as never,
     cls as never,
+    profiles as never,
   );
 
   beforeEach(() => {
@@ -89,6 +92,35 @@ describe('NotificationPreferencesService', () => {
     expect(updateQb.set.mock.calls[1][0].mutedNotifications()).toBe(
       'array_remove(muted_notifications, :category)',
     );
+  });
+
+  it("shares an account holder's choices with their other churches", async () => {
+    const holder = {
+      id: 'm1',
+      discuvaAccountId: 'acc-1',
+      mutedNotifications: [EmailCategory.BIRTHDAY],
+    };
+    memberRepo.findOne.mockResolvedValue(holder);
+    profiles.ownerOf.mockResolvedValueOnce('acc-1');
+
+    await service.update('m1', {
+      category: EmailCategory.BIRTHDAY,
+      enabled: false,
+    });
+
+    expect(profiles.update).toHaveBeenCalledWith(
+      holder,
+      { mutedNotifications: [EmailCategory.BIRTHDAY] },
+      { skipCurrent: true },
+    );
+  });
+
+  it('keeps choices at this church while Global Profile is off', async () => {
+    await service.update('m1', {
+      category: EmailCategory.BIRTHDAY,
+      enabled: false,
+    });
+    expect(profiles.update).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown member', async () => {

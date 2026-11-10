@@ -1,3 +1,4 @@
+import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
 import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { AccountTypeAdminService } from '../../account-type/account-type-admin.service';
 import { TenantReportService } from '../../tenant/service/tenant-report.service';
@@ -71,6 +72,8 @@ const mockProtectedNames = {
   remove: jest.fn(),
 };
 
+const mockPhotoRemovals = { reports: jest.fn().mockResolvedValue([]) };
+
 describe('PlatformAdminController (billing support routes)', () => {
   let controller: PlatformAdminController;
 
@@ -122,6 +125,7 @@ describe('PlatformAdminController (billing support routes)', () => {
           useValue: mockPlatformSettingsService,
         },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PhotoRemovalService, useValue: mockPhotoRemovals },
       ],
     })
       .overrideGuard(PlatformAdminGuard)

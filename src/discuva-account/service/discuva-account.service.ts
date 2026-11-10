@@ -17,6 +17,7 @@ import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity
 import { DiscuvaAccountCodeService } from './discuva-account-code.service';
 import { normaliseEmail } from '../util/normalise-email';
 import { Member } from '../../member/entity/member.entity';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { Admin } from '../../admin/entity/admin.entity';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
@@ -83,13 +84,23 @@ export class DiscuvaAccountService {
   }
 
   isOn(): Promise<boolean> {
-    return this.memo(`on:${this.cls.get('tenantId')}`, () => this.readIsOn());
+    return this.memo(`on:${this.cls.get('tenantId')}`, () =>
+      this.readModeOn(PlatformSettingKey.DISCUVA_ACCOUNT_MODE),
+    );
   }
 
-  private async readIsOn(): Promise<boolean> {
-    const mode = await this.platformSettings.getNumber(
-      PlatformSettingKey.DISCUVA_ACCOUNT_MODE,
+  // Global Profile builds on One Discuva sign-in, so it needs both switches on for this church.
+  isProfileOn(): Promise<boolean> {
+    return this.memo(
+      `profile:${this.cls.get('tenantId')}`,
+      async () =>
+        (await this.isOn()) &&
+        this.readModeOn(PlatformSettingKey.DISCUVA_PROFILE_MODE),
     );
+  }
+
+  private async readModeOn(key: PlatformSettingKey): Promise<boolean> {
+    const mode = await this.platformSettings.getNumber(key);
     if (mode === AccountMode.ON) return true;
     if (mode !== AccountMode.TEST) return false;
     const tenantId = this.cls.get('tenantId');
@@ -396,13 +407,36 @@ export class DiscuvaAccountService {
     this.forgetMemo();
   }
 
-  async link(accountId: string, memberId: string): Promise<void> {
+  async link(
+    accountId: string,
+    memberId: string,
+    consented = false,
+  ): Promise<void> {
     const tenantId = this.cls.get('tenantId');
-    await this.linkRepo.upsert({ accountId, tenantId, memberId }, [
-      'tenantId',
-      'memberId',
-    ]);
+    await this.linkRepo.upsert(
+      {
+        accountId,
+        tenantId,
+        memberId,
+        ...(consented && { consentedAt: new Date() }),
+      },
+      ['tenantId', 'memberId'],
+    );
     await this.memberRepo.update(memberId, { discuvaAccountId: accountId });
+  }
+
+  async linkHere(memberId: string): Promise<DiscuvaAccountLink | null> {
+    return this.linkRepo.findOne({
+      where: { tenantId: this.cls.get('tenantId'), memberId },
+    });
+  }
+
+  // Agreement to share the Discuva profile with this church, for people linked before it was asked.
+  async recordConsent(memberId: string): Promise<void> {
+    await this.linkRepo.update(
+      { tenantId: this.cls.get('tenantId'), memberId },
+      { consentedAt: new Date() },
+    );
   }
 
   async linksOf(accountId: string): Promise<DiscuvaAccountLink[]> {
@@ -451,6 +485,45 @@ export class DiscuvaAccountService {
     this.logger.warn(`Discuva account ${accountId} frozen by its owner`);
   }
 
+  // Ends the account. Each church keeps its history under "Former member", so totals don't change.
+  // Returns the church photo files to remove once this has committed.
+  async erase(accountId: string): Promise<string[]> {
+    await this.endAllSessions(accountId);
+    const files: string[] = [];
+    await this.forEachLinkOf(accountId, async (memberId) => {
+      const row = await this.memberRepo.findOne({
+        where: { id: memberId },
+        select: { id: true, photoPublicId: true },
+      });
+      if (row?.photoPublicId) files.push(row.photoPublicId);
+      await this.memberRepo.update(memberId, {
+        firstname: 'Former',
+        lastname: 'member',
+        email: `former-${memberId}@deleted.invalid`,
+        password: await UtilityService.hashValue(
+          randomBytes(32).toString('hex'),
+        ),
+        deviceId: null,
+        discuvaAccountId: null,
+        status: MemberStatusEnum.INACTIVE,
+        phoneNumber: null,
+        photoUrl: null,
+        photoPublicId: null,
+        birthDay: null,
+        birthMonth: null,
+        birthYear: null,
+        address: null,
+        emergencyContactName: null,
+        emergencyContactPhone: null,
+        emergencyContactRelationship: null,
+        mutedNotifications: [],
+      });
+    });
+    await this.accountRepo.delete(accountId);
+    this.forgetMemo();
+    return files;
+  }
+
   async endAllSessions(accountId: string): Promise<void> {
     await this.forEachLinkOf(accountId, (memberId) =>
       Promise.all([
@@ -468,6 +541,15 @@ export class DiscuvaAccountService {
       select: { id: true },
     });
     if (other && other.id !== accountId) return true;
+    return this.emailTakenAtChurchesOf(normalised, accountId);
+  }
+
+  // Someone else at one of this account's churches already uses the email.
+  async emailTakenAtChurchesOf(
+    email: string,
+    accountId: string,
+  ): Promise<boolean> {
+    const normalised = normaliseEmail(email);
     let taken = false;
     await this.forEachLinkOf(accountId, async (memberId) => {
       const holder = await this.memberRepo.findOne({
@@ -477,6 +559,50 @@ export class DiscuvaAccountService {
       if (holder && holder.id !== memberId) taken = true;
     });
     return taken;
+  }
+
+  async sharesChurch(a: string, b: string): Promise<boolean> {
+    const [mine, theirs] = await Promise.all([
+      this.linksOf(a),
+      this.linksOf(b),
+    ]);
+    const tenants = new Set(mine.map((l) => l.tenantId));
+    return theirs.some((l) => tenants.has(l.tenantId));
+  }
+
+  // Moves everything from the second account onto the first: churches, milestones, photo history.
+  // Those churches' records take the kept account's email and password, so one sign-in works everywhere.
+  async mergeInto(keepId: string, goneId: string): Promise<void> {
+    const keep = await this.findById(keepId);
+    if (!keep) throw new BadRequestException('Account not found.');
+    await this.forEachLinkOf(goneId, (memberId) =>
+      this.memberRepo
+        .update(memberId, {
+          discuvaAccountId: keep.id,
+          email: keep.email,
+          password: keep.password,
+        })
+        .then(() => undefined),
+    );
+    await this.linkRepo.update({ accountId: goneId }, { accountId: keep.id });
+    const manager = this.accountRepo.manager;
+    // The same church record on both would clash with the one-per-source rule; the kept one stays.
+    await manager.query(
+      `DELETE FROM public.discuva_milestones g WHERE g.account_id = $2 AND g.source_ref IS NOT NULL
+         AND EXISTS (SELECT 1 FROM public.discuva_milestones k WHERE k.account_id = $1
+                       AND k.source_tenant_id = g.source_tenant_id AND k.source_ref = g.source_ref)`,
+      [keep.id, goneId],
+    );
+    await manager.query(
+      `UPDATE public.discuva_milestones SET account_id = $1 WHERE account_id = $2`,
+      [keep.id, goneId],
+    );
+    await manager.query(
+      `UPDATE public.discuva_photo_removals SET account_id = $1 WHERE account_id = $2`,
+      [keep.id, goneId],
+    );
+    await this.accountRepo.delete(goneId);
+    this.forgetMemo();
   }
 
   // Moves the account and every linked church record to the new email; returns the old one.
@@ -573,6 +699,26 @@ export class DiscuvaAccountService {
 
   // Basics from the person's member record at a church they already belong to.
   async basicsFrom(accountId: string): Promise<Partial<Member> | null> {
+    const first = await this.firstChurchRecord(accountId);
+    if (!first) return null;
+    const m = first.member;
+    return {
+      id: m.id,
+      firstname: m.firstname,
+      lastname: m.lastname,
+      phoneNumber: m.phoneNumber,
+      gender: m.gender,
+      birthDay: m.birthDay,
+      birthMonth: m.birthMonth,
+      birthYear: m.birthYear,
+      maritalStatus: m.maritalStatus,
+    };
+  }
+
+  // The person's record at the church they joined first: where a new profile starts.
+  async firstChurchRecord(
+    accountId: string,
+  ): Promise<{ tenantId: string; member: Member } | null> {
     const [first] = await this.linksOf(accountId);
     if (!first) return null;
     const tenant = await this.tenantRepo.findOne({
@@ -580,26 +726,13 @@ export class DiscuvaAccountService {
       select: { id: true, schemaName: true },
     });
     if (!tenant) return null;
-    return runInTenantContext(
+    const member = await runInTenantContext(
       this.cls,
       this.txHost,
       { tenantId: tenant.id, schemaName: tenant.schemaName },
-      () =>
-        this.memberRepo.findOne({
-          where: { id: first.memberId },
-          select: {
-            id: true,
-            firstname: true,
-            lastname: true,
-            phoneNumber: true,
-            gender: true,
-            birthDay: true,
-            birthMonth: true,
-            birthYear: true,
-            maritalStatus: true,
-          },
-        }),
+      () => this.memberRepo.findOne({ where: { id: first.memberId } }),
     );
+    return member ? { tenantId: tenant.id, member } : null;
   }
 
   // Under-18s keep church-only sign-in.

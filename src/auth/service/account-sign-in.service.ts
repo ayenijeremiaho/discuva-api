@@ -26,6 +26,12 @@ import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { JoinCompleteDto } from '../dto/account.dto';
+import { AccountDeletionService } from '../../discuva-account/service/account-deletion.service';
+import {
+  DetailChoice,
+  DetailToConfirm,
+  DiscuvaProfileService,
+} from '../../discuva-account/service/discuva-profile.service';
 import { JwtResponse } from '../interface/auth.interface';
 import { AuthService, DEVICE_CONFIRMATION_REQUIRED } from './auth.service';
 import { SessionSurface } from '../enum/session-surface.enum';
@@ -78,6 +84,8 @@ export class AccountSignInService {
     private readonly utilityService: UtilityService,
     private readonly auditLogService: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly profiles: DiscuvaProfileService,
+    private readonly deletion: AccountDeletionService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -86,7 +94,7 @@ export class AccountSignInService {
   async startJoin(email: string, deviceId: string): Promise<void> {
     await this.assertOn();
     const account = await this.accounts.findByEmail(email);
-    const basics = account ? await this.accounts.basicsFrom(account.id) : null;
+    const basics = account ? await this.basicsOf(account.id) : null;
     const churchName = await this.utilityService.resolveChurchName();
     await this.codes.sendCode(email, DiscuvaAccountCodePurpose.JOIN, deviceId, {
       firstName: basics?.firstname ?? null,
@@ -124,7 +132,7 @@ export class AccountSignInService {
       JOIN_TOKEN_TTL_SECONDS,
     );
     if (!account) return { status: 'NEW', joinToken };
-    const basics = await this.accounts.basicsFrom(account.id);
+    const basics = await this.basicsOf(account.id);
     return {
       status: 'EXISTING_ACCOUNT',
       joinToken,
@@ -147,7 +155,8 @@ export class AccountSignInService {
         'This step has expired. Please start again with your email.',
       );
     }
-    const { joinToken, deviceId, password, ...details } = dto;
+    const { joinToken, deviceId, password, consent, ...details } = dto;
+    await this.assertConsent(consent);
 
     const { account, signup, createdNow } = ticket.accountId
       ? await this.joinWithAccount(ticket, deviceId, details)
@@ -160,7 +169,7 @@ export class AccountSignInService {
         account,
         deviceId,
       );
-      await this.accounts.link(account.id, member.id);
+      await this.accounts.link(account.id, member.id, !!consent);
     } catch (err) {
       // A new account that never got its church would block this email later.
       if (createdNow) await this.accounts.remove(account.id);
@@ -168,6 +177,7 @@ export class AccountSignInService {
     }
     this.cacheService.delGlobal(this.joinKey(joinToken));
     const full = await this.memberService.getById(member.id, ['workerProfile']);
+    if (await this.profiles.ownerOf(full)) await this.profiles.reconcile(full);
     return this.authService.startMemberSession(full, 'MEMBER_LOGIN');
   }
 
@@ -180,7 +190,7 @@ export class AccountSignInService {
     const account = await this.accounts.findById(ticket.accountId!);
     if (!account) throw new BadRequestException('Please start again.');
     this.assertNotFrozen(account);
-    const basics = await this.accounts.basicsFrom(account.id);
+    const basics = await this.basicsOf(account.id);
     const firstname = basics?.firstname ?? details.firstname?.trim();
     const lastname = basics?.lastname ?? details.lastname?.trim();
     if (!firstname || !lastname) {
@@ -243,8 +253,13 @@ export class AccountSignInService {
     );
   }
 
-  async confirmLink(memberId: string, code: string): Promise<void> {
+  async confirmLink(
+    memberId: string,
+    code: string,
+    consent = false,
+  ): Promise<void> {
     await this.assertOn();
+    await this.assertConsent(consent);
     const { member, account } = await this.linkCandidate(memberId);
     await this.codes.verifyCode(
       member.email,
@@ -252,8 +267,13 @@ export class AccountSignInService {
       this.linkDevice(member),
       code,
     );
-    await this.accounts.link(account.id, member.id);
+    await this.accounts.link(account.id, member.id, consent);
     await this.memberService.applyAccountCredentials(member.id, account);
+    if (await this.accounts.isProfileOn()) {
+      await this.profiles.reconcile(
+        Object.assign(member, { discuvaAccountId: account.id }),
+      );
+    }
     this.auditLogService.log('ACCOUNT_LINKED', {
       targetId: member.id,
       targetEmail: member.email,
@@ -413,8 +433,12 @@ export class AccountSignInService {
     return this.memberService.getByIdWithCredentials(user.id);
   }
 
-  available(): Promise<boolean> {
-    return this.accounts.isOn();
+  async available(): Promise<{ available: boolean; profile: boolean }> {
+    const [available, profile] = await Promise.all([
+      this.accounts.isOn(),
+      this.accounts.isProfileOn(),
+    ]);
+    return { available, profile };
   }
 
   // What the member app shows on Account and after sign-in.
@@ -423,13 +447,72 @@ export class AccountSignInService {
     moved: boolean;
     linkAvailable: boolean;
     email: string;
+    profile: boolean;
+    needsConsent: boolean;
+    detailsToConfirm: DetailToConfirm[];
+    deletesOn: Date | null;
   }> {
     const member = await this.memberService.getById(memberId);
     const enabled = await this.accounts.isOn();
     const moved = enabled && !!member.discuvaAccountId;
     const linkAvailable =
       enabled && !moved && !!(await this.accounts.findByEmail(member.email));
-    return { enabled, moved, linkAvailable, email: member.email };
+    const profile = moved && !!(await this.profiles.ownerOf(member));
+    const [link, detailsToConfirm, account] = profile
+      ? await Promise.all([
+          this.accounts.linkHere(member.id),
+          this.profiles.reconcile(member),
+          this.accounts.accountFor(member),
+        ])
+      : [null, [], null];
+    return {
+      enabled,
+      moved,
+      linkAvailable,
+      email: member.email,
+      profile,
+      needsConsent: profile && !link?.consentedAt,
+      detailsToConfirm,
+      deletesOn: account ? await this.deletion.scheduledFor(account) : null,
+    };
+  }
+
+  async consent(memberId: string): Promise<void> {
+    await this.assertProfileOn(memberId);
+    await this.accounts.recordConsent(memberId);
+  }
+
+  async confirmDetails(
+    memberId: string,
+    choices: Record<string, DetailChoice>,
+  ): Promise<void> {
+    const member = await this.assertProfileOn(memberId);
+    await this.profiles.resolve(member, choices);
+  }
+
+  private async assertProfileOn(memberId: string): Promise<Member> {
+    const member = await this.memberService.getById(memberId);
+    if (!(await this.profiles.ownerOf(member))) {
+      throw new NotFoundException('This is not available yet.');
+    }
+    return member;
+  }
+
+  // Joining or adding a church shares the person's profile with it, so they agree first.
+  private async assertConsent(consent: boolean | undefined): Promise<void> {
+    if (consent || !(await this.accounts.isProfileOn())) return;
+    const churchName = await this.utilityService.resolveChurchName();
+    throw new BadRequestException(
+      `Please agree to share your Discuva profile with ${churchName}.`,
+    );
+  }
+
+  // The profile once there is one, otherwise the church the person joined first.
+  private async basicsOf(accountId: string): Promise<Partial<Member> | null> {
+    return (
+      (await this.profiles.basicsFor(accountId)) ??
+      (await this.accounts.basicsFrom(accountId))
+    );
   }
 
   async signOutEverywhere(memberId: string): Promise<void> {
@@ -503,6 +586,10 @@ export class AccountSignInService {
       'birthMonth',
       'birthYear',
       'maritalStatus',
+      'address',
+      'emergencyContactName',
+      'emergencyContactPhone',
+      'emergencyContactRelationship',
     ] as const) {
       if (basics[key] !== null && basics[key] !== undefined)
         out[key] = basics[key];

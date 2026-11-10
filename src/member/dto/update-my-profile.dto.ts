@@ -11,6 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { GenderEnum } from '../enums/gender.enum';
+import { ContactDetailsDto } from './contact-details.dto';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
 import {
   IsNormalizedPhone,
@@ -18,7 +19,7 @@ import {
 } from '../../utility/decorators/normalize-phone.decorator';
 
 // Excludes email — changed via the OTP-gated email-change flow. Church-journey fields accept null to clear.
-export class UpdateMyProfileDto {
+export class UpdateMyProfileDto extends ContactDetailsDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()

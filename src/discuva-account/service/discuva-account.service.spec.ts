@@ -24,6 +24,8 @@ const qb = (result: unknown) => ({
 });
 
 const accountRepo = {
+  manager: { query: jest.fn() },
+  delete: jest.fn(),
   createQueryBuilder: jest.fn(),
   exists: jest.fn(),
   findOne: jest.fn(),
@@ -32,6 +34,7 @@ const accountRepo = {
   update: jest.fn(),
 };
 const linkRepo = {
+  update: jest.fn(),
   upsert: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
@@ -132,6 +135,23 @@ describe('DiscuvaAccountService', () => {
       store.tenantId = 't9';
       await expect(service.isOn()).resolves.toBe(false);
       expect(tenantRepo.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('turns Global Profile on only where One Discuva sign-in is also on', async () => {
+      const modes = (account: number, profile: number) =>
+        settings.getNumber.mockImplementation(async (key: string) =>
+          key === 'discuva_account_mode'
+            ? account
+            : key === 'discuva_profile_mode'
+              ? profile
+              : 10,
+        );
+      modes(2, 0);
+      await expect(service.isProfileOn()).resolves.toBe(false);
+      modes(0, 2);
+      await expect(service.isProfileOn()).resolves.toBe(false);
+      modes(2, 2);
+      await expect(service.isProfileOn()).resolves.toBe(true);
     });
   });
 
@@ -368,6 +388,71 @@ describe('DiscuvaAccountService', () => {
       expect(accountRepo.update).not.toHaveBeenCalled();
       expect(memberRepo.update).toHaveBeenCalledWith('m1', { deviceId: null });
       expect(cls.runWith).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('combining two accounts', () => {
+    it("moves the other account's churches, milestones and photo history, then removes it", async () => {
+      accountRepo.createQueryBuilder.mockReturnValue(
+        qb({ id: 'keep', email: 'ada@example.com', password: 'hash' }),
+      );
+      linkRepo.find.mockResolvedValue([{ tenantId: 't2', memberId: 'm2' }]);
+      tenantRepo.find.mockResolvedValue([{ id: 't2', schemaName: 'church_b' }]);
+
+      await service.mergeInto('keep', 'gone');
+
+      expect(memberRepo.update).toHaveBeenCalledWith('m2', {
+        discuvaAccountId: 'keep',
+        email: 'ada@example.com',
+        password: 'hash',
+      });
+      expect(linkRepo.update).toHaveBeenCalledWith(
+        { accountId: 'gone' },
+        { accountId: 'keep' },
+      );
+      const sql = accountRepo.manager.query.mock.calls.map(([q]) => q);
+      expect(sql[0]).toContain('DELETE FROM public.discuva_milestones');
+      expect(sql[1]).toContain('UPDATE public.discuva_milestones');
+      expect(sql[2]).toContain('UPDATE public.discuva_photo_removals');
+      expect(accountRepo.delete).toHaveBeenCalledWith('gone');
+    });
+
+    it('knows when two accounts share a church', async () => {
+      linkRepo.find
+        .mockResolvedValueOnce([{ tenantId: 't1' }])
+        .mockResolvedValueOnce([{ tenantId: 't2' }, { tenantId: 't1' }]);
+      await expect(service.sharesChurch('a', 'b')).resolves.toBe(true);
+    });
+  });
+
+  describe('deleting an account', () => {
+    it('leaves each church a "Former member" record without personal details, then removes the account', async () => {
+      linkRepo.find.mockResolvedValue([{ tenantId: 't2', memberId: 'm2' }]);
+      tenantRepo.find.mockResolvedValue([{ id: 't2', schemaName: 'church_b' }]);
+      memberRepo.findOne.mockResolvedValue({
+        id: 'm2',
+        photoPublicId: 'tenants/t2/profile-pictures/1',
+      });
+
+      const files = await service.erase('acc-1');
+
+      expect(memberRepo.update).toHaveBeenCalledWith(
+        'm2',
+        expect.objectContaining({
+          firstname: 'Former',
+          lastname: 'member',
+          email: 'former-m2@deleted.invalid',
+          discuvaAccountId: null,
+          status: 'INACTIVE',
+          phoneNumber: null,
+          address: null,
+          emergencyContactPhone: null,
+          photoUrl: null,
+        }),
+      );
+      expect(sessionService.updateLogout).toHaveBeenCalled();
+      expect(accountRepo.delete).toHaveBeenCalledWith('acc-1');
+      expect(files).toEqual(['tenants/t2/profile-pictures/1']);
     });
   });
 

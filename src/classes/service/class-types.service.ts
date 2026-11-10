@@ -33,6 +33,7 @@ export class ClassTypesService {
     const classType = this.classTypeRepo.create({
       name: dto.name,
       description: dto.description ?? null,
+      countsAs: dto.countsAs ?? null,
       nextClassType,
     });
     const saved = await this.classTypeRepo.save(classType);
@@ -50,6 +51,7 @@ export class ClassTypesService {
     if (dto.name !== undefined) classType.name = dto.name;
     if (dto.description !== undefined) classType.description = dto.description;
     if (dto.isActive !== undefined) classType.isActive = dto.isActive;
+    if (dto.countsAs !== undefined) classType.countsAs = dto.countsAs;
 
     if (dto.nextClassTypeId !== undefined) {
       const nextClassType = await this.resolveNextClassType(

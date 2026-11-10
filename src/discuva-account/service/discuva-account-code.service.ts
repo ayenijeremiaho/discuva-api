@@ -20,7 +20,9 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { normaliseEmail } from '../util/normalise-email';
 
 type LinkPurpose =
-  DiscuvaAccountCodePurpose.FREEZE | DiscuvaAccountCodePurpose.EMAIL_UNDO;
+  | DiscuvaAccountCodePurpose.FREEZE
+  | DiscuvaAccountCodePurpose.EMAIL_UNDO
+  | DiscuvaAccountCodePurpose.DELETE_CANCEL;
 
 const tooMany = (message: string) =>
   new HttpException(
@@ -143,11 +145,14 @@ export class DiscuvaAccountCodeService {
     accountId: string,
     purpose: LinkPurpose,
     email: string,
+    validDays?: number,
   ): Promise<string> {
     const token = randomBytes(32).toString('hex');
-    const days = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_LINK_VALID_DAYS,
-    );
+    const days =
+      validDays ??
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.ACCOUNT_LINK_VALID_DAYS,
+      ));
     await this.codeRepo.save(
       this.codeRepo.create({
         email: normaliseEmail(email),

@@ -6,6 +6,7 @@ import {
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -41,6 +42,19 @@ import { ChangePasswordDto } from '../dto/change-password.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import {
+  DiscuvaProfileService,
+  PROFILE_FIELDS,
+} from '../../discuva-account/service/discuva-profile.service';
+import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
+import { PhotoRemovalReason } from '../../discuva-account/enum/photo-removal-reason.enum';
+
+const MY_PROFILE_RELATIONS = [
+  'workerProfile',
+  'workerProfile.department',
+  'clergy',
+  'clergy.title',
+];
 
 @Injectable()
 export class MemberService {
@@ -67,6 +81,8 @@ export class MemberService {
     private readonly pushService: PushNotificationService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly accounts: DiscuvaAccountService,
+    private readonly profiles: DiscuvaProfileService,
+    private readonly photoRemovals: PhotoRemovalService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -754,14 +770,15 @@ export class MemberService {
       }
     }
 
-    if (dto.firstname) member.firstname = dto.firstname;
-    if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
-    if (dto.gender) member.gender = dto.gender;
-    if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
-    if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
-    if (dto.birthYear !== undefined) member.birthYear = dto.birthYear ?? null;
-    if (dto.maritalStatus) member.maritalStatus = dto.maritalStatus;
+    if (
+      (await this.profiles.ownerOf(member)) &&
+      DiscuvaProfileService.changedBasics(member, dto).length
+    ) {
+      throw new ForbiddenException(
+        `${member.firstname} looks after their own name, contact and personal details in their Discuva profile, so they can't be changed here.`,
+      );
+    }
+    this.applyBasics(member, dto);
     if (dto.yearBornAgain)
       member.yearBornAgain = new Date(`${dto.yearBornAgain}-01-01`);
     if (dto.yearBaptized)
@@ -831,14 +848,7 @@ export class MemberService {
       'clergy.title',
     ]);
 
-    if (dto.firstname) member.firstname = dto.firstname;
-    if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
-    if (dto.gender) member.gender = dto.gender;
-    if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
-    if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
-    if (dto.birthYear !== undefined) member.birthYear = dto.birthYear ?? null;
-    if (dto.maritalStatus) member.maritalStatus = dto.maritalStatus;
+    this.applyBasics(member, dto);
     if (dto.dateJoinedChurch !== undefined)
       member.dateJoinedChurch = dto.dateJoinedChurch
         ? new Date(dto.dateJoinedChurch)
@@ -856,6 +866,14 @@ export class MemberService {
     await this.applyOwnWorkerDetails(member, dto);
 
     const saved = await this.memberRepository.save(member);
+    if (await this.profiles.ownerOf(saved)) {
+      const sent = PROFILE_FIELDS.filter((f) => dto[f] !== undefined);
+      await this.profiles.update(
+        saved,
+        Object.fromEntries(sent.map((f) => [f, saved[f]])),
+        { skipCurrent: true },
+      );
+    }
     this.auditLogService.log('MEMBER_UPDATED', {
       actorId: memberId,
       targetId: memberId,
@@ -873,7 +891,38 @@ export class MemberService {
     const member = await this.getById(memberId);
     if (appearanceMode !== undefined) member.appearanceMode = appearanceMode;
     if (useChurchTheme !== undefined) member.useChurchTheme = useChurchTheme;
-    return this.memberRepository.save(member);
+    const saved = await this.memberRepository.save(member);
+    if (appearanceMode !== undefined && (await this.profiles.ownerOf(saved))) {
+      await this.profiles.update(
+        saved,
+        { appearanceMode },
+        { skipCurrent: true },
+      );
+    }
+    return saved;
+  }
+
+  // Empty names are ignored, as before; other basics can be cleared with null.
+  private applyBasics(
+    member: Member,
+    dto: Partial<Pick<Member, (typeof PROFILE_FIELDS)[number]>>,
+  ): void {
+    if (dto.firstname) member.firstname = dto.firstname;
+    if (dto.lastname) member.lastname = dto.lastname;
+    if (dto.gender) member.gender = dto.gender;
+    if (dto.maritalStatus) member.maritalStatus = dto.maritalStatus;
+    for (const f of [
+      'phoneNumber',
+      'birthDay',
+      'birthMonth',
+      'birthYear',
+      'address',
+      'emergencyContactName',
+      'emergencyContactPhone',
+      'emergencyContactRelationship',
+    ] as const) {
+      if (dto[f] !== undefined) (member[f] as unknown) = dto[f] ?? null;
+    }
   }
 
   async updateMyPhoto(
@@ -886,6 +935,12 @@ export class MemberService {
       'clergy',
       'clergy.title',
     ]);
+
+    if (await this.profiles.ownerOf(member)) {
+      await this.profiles.setPhoto(member, file);
+      this.logPhotoChange('MEMBER_PHOTO_UPDATED', member, memberId, true);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
 
     const previousPublicId = member.photoPublicId;
     const uploaded = await this.cloudinaryService.uploadBuffer(
@@ -913,12 +968,12 @@ export class MemberService {
   }
 
   async removeMyPhoto(memberId: string): Promise<Member> {
-    const member = await this.getById(memberId, [
-      'workerProfile',
-      'workerProfile.department',
-      'clergy',
-      'clergy.title',
-    ]);
+    const member = await this.getById(memberId, MY_PROFILE_RELATIONS);
+    if (await this.profiles.ownerOf(member)) {
+      await this.profiles.clearPhoto(member);
+      this.logPhotoChange('MEMBER_PHOTO_REMOVED', member, memberId, true);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
       actorId: memberId,
@@ -929,13 +984,24 @@ export class MemberService {
     return saved;
   }
 
-  async removeMemberPhoto(memberId: string, actorId: string): Promise<Member> {
-    const member = await this.getById(memberId, [
-      'workerProfile',
-      'workerProfile.department',
-      'clergy',
-      'clergy.title',
-    ]);
+  // For an account holder the photo is theirs everywhere, so removing it needs a reason they are sent.
+  async removeMemberPhoto(
+    memberId: string,
+    actorId: string,
+    reason?: PhotoRemovalReason,
+    note?: string | null,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, MY_PROFILE_RELATIONS);
+    if (await this.profiles.ownerOf(member)) {
+      if (!reason) {
+        throw new BadRequestException(
+          `Choose why you're removing ${member.firstname}'s photo. They'll be told.`,
+        );
+      }
+      await this.photoRemovals.remove(member, actorId, reason, note ?? null);
+      this.logPhotoChange('MEMBER_PHOTO_REMOVED', member, actorId, false);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
       actorId,
@@ -944,6 +1010,20 @@ export class MemberService {
       metadata: { self: false },
     });
     return saved;
+  }
+
+  private logPhotoChange(
+    action: 'MEMBER_PHOTO_UPDATED' | 'MEMBER_PHOTO_REMOVED',
+    member: Member,
+    actorId: string,
+    self: boolean,
+  ): void {
+    this.auditLogService.log(action, {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      metadata: { self },
+    });
   }
 
   private async clearPhoto(member: Member): Promise<Member> {

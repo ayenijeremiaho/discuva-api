@@ -20,6 +20,7 @@ export function accountsOffMock(
   );
   return {
     isOn: jest.fn().mockResolvedValue(false),
+    isProfileOn: jest.fn().mockResolvedValue(false),
     accountFor: jest.fn().mockResolvedValue(null),
     hasAccount: jest.fn().mockResolvedValue(false),
     verifyPassword: jest.fn((member: { password: string }, password: string) =>

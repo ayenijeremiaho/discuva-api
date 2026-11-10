@@ -55,6 +55,18 @@ export class MemberDto {
   phoneNumber: string;
 
   @Expose()
+  address: string | null;
+
+  @Expose()
+  emergencyContactName: string | null;
+
+  @Expose()
+  emergencyContactPhone: string | null;
+
+  @Expose()
+  emergencyContactRelationship: string | null;
+
+  @Expose()
   changedPassword: boolean;
 
   // Signs in with a shared Discuva account; the admin portal offers Recover account for these.

@@ -7,6 +7,7 @@ import { ClergyTitle } from '../clergy-title/entity/clergy-title.entity';
 import { MemberImportJob } from './entity/member-import-job.entity';
 import { MemberImportRow } from './entity/member-import-row.entity';
 import { MemberSession } from './entity/member-session.entity';
+import { MilestoneController } from './controller/milestone.controller';
 import { MemberService } from './service/member.service';
 import { MemberSessionService } from './service/member-session.service';
 import { MemberImportService } from './service/member-import.service';
@@ -52,7 +53,7 @@ import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.e
     UtilityModule,
     FollowUpModule,
   ],
-  controllers: [MemberController, MemberImportController],
+  controllers: [MemberController, MemberImportController, MilestoneController],
   providers: [
     MemberService,
     MemberSessionService,

@@ -25,6 +25,7 @@ import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { UpdateMemberDto } from '../dto/update-member.dto';
+import { RemovePhotoDto } from '../dto/remove-photo.dto';
 import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { BulkUpdateTraineeDto } from '../dto/bulk-update-trainee.dto';
@@ -413,8 +414,14 @@ export class MemberController {
   async removeMemberPhoto(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: MemberAuth,
+    @Body() dto: RemovePhotoDto,
   ): Promise<MemberDto> {
-    const member = await this.memberService.removeMemberPhoto(id, user.id);
+    const member = await this.memberService.removeMemberPhoto(
+      id,
+      user.id,
+      dto?.reason,
+      dto?.note,
+    );
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });

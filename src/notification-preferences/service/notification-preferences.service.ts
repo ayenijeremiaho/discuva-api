@@ -7,6 +7,7 @@ import { ChurchSettingsService } from '../../church-settings/service/church-sett
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { DiscuvaProfileService } from '../../discuva-account/service/discuva-profile.service';
 import {
   MEMBER_NOTIFICATION_CHOICES,
   MemberNotificationChoice,
@@ -29,6 +30,7 @@ export class NotificationPreferencesService {
     private readonly categorySettings: EmailCategorySettingsService,
     private readonly planFeatures: PlanFeatureResolverService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly profiles: DiscuvaProfileService,
   ) {}
 
   // Only kinds this church actually sends: module on, and email or push left on for the category.
@@ -69,7 +71,22 @@ export class NotificationPreferencesService {
       .where('id = :memberId', { memberId })
       .setParameter('category', category)
       .execute();
+    await this.shareWithOtherChurches(memberId);
     return this.list(memberId);
+  }
+
+  // With Global Profile on, the person's choices follow them to every church.
+  private async shareWithOtherChurches(memberId: string): Promise<void> {
+    const member = await this.memberRepo.findOne({
+      where: { id: memberId },
+      select: { id: true, discuvaAccountId: true, mutedNotifications: true },
+    });
+    if (!member || !(await this.profiles.ownerOf(member))) return;
+    await this.profiles.update(
+      member,
+      { mutedNotifications: member.mutedNotifications },
+      { skipCurrent: true },
+    );
   }
 
   private async isOffered(choice: MemberNotificationChoice): Promise<boolean> {

@@ -2430,7 +2430,16 @@
                 }
               ]
             },
-            "description": "AdminGuard (MEMBERS_WRITE). Moderation — clears a member's profile photo (Cloudinary asset deleted, photoUrl set to null). Returns the updated member profile."
+            "description": "AdminGuard (MEMBERS_WRITE). Moderation — clears a member's profile photo (Cloudinary asset deleted, photoUrl set to null). Returns the updated member profile. For someone with a Discuva profile, reason is required (NOT_A_PERSON, OFFENSIVE, SOMEONE_ELSE, OTHER) and they are emailed it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"NOT_A_PERSON\",\n  \"note\": \"Please use a photo of yourself.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": [
             {
@@ -8799,7 +8808,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Believers' Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"nextClassTypeId\": \"{{classTypeId}}\"\n}",
+              "raw": "{\n  \"name\": \"Believers' Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"nextClassTypeId\": \"{{classTypeId}}\",\n  \"countsAs\": \"MEMBERSHIP_CLASS\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8816,7 +8825,7 @@
                 "types"
               ]
             },
-            "description": "nextClassTypeId is optional — omit for a standalone class type with no promotion chain."
+            "description": "nextClassTypeId is optional — omit for a standalone class type with no promotion chain. countsAs: MEMBERSHIP_CLASS, WORKERS_TRAINING or null; completing the class adds that milestone to members' Discuva profiles."
           },
           "event": [
             {
@@ -8857,7 +8866,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nextClassTypeId\": \"{{classTypeId}}\"\n}",
+              "raw": "{\n  \"nextClassTypeId\": \"{{classTypeId}}\",\n  \"countsAs\": \"MEMBERSHIP_CLASS\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8881,7 +8890,7 @@
                 }
               ]
             },
-            "description": "Send nextClassTypeId: null to clear the promotion chain and make the type standalone again."
+            "description": "Send nextClassTypeId: null to clear the promotion chain and make the type standalone again. countsAs: MEMBERSHIP_CLASS, WORKERS_TRAINING or null; completing the class adds that milestone to members' Discuva profiles."
           },
           "response": []
         },
@@ -46303,7 +46312,7 @@
                 "available"
               ]
             },
-            "description": "Public. {available}: show email-first joining when true.",
+            "description": "Public. {available, profile}: available shows email-first joining; profile turns on the Global Profile screens.",
             "auth": {
               "type": "noauth"
             }
@@ -46439,10 +46448,10 @@
                 "complete"
               ]
             },
-            "description": "Creates the member here and signs in. Name and password are only read for someone new; an existing account brings its own and must be on this phone.",
+            "description": "Creates the member here and signs in. Name and password are only read for someone new; an existing account brings its own and must be on this phone. With Global Profile on, consent: true is required.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"joinToken\": \"{{joinToken}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"firstname\": \"Ada\",\n  \"lastname\": \"Obi\",\n  \"password\": \"Str0ng!pass\"\n}",
+              "raw": "{\n  \"joinToken\": \"{{joinToken}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"firstname\": \"Ada\",\n  \"lastname\": \"Obi\",\n  \"password\": \"Str0ng!pass\",\n  \"consent\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -46513,10 +46522,10 @@
                 "confirm"
               ]
             },
-            "description": "Links this church; the account's password and device apply here from now on.",
+            "description": "Links this church; the account's password and device apply here from now on. With Global Profile on, consent: true is required.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"123456\"\n}",
+              "raw": "{\n  \"code\": \"123456\",\n  \"consent\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -46923,6 +46932,637 @@
               }
             },
             "description": "Registers this church app's phone after the right code and signs in (same response as login)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Global Profile (Phase 3)",
+      "description": "Only while the Global Profile platform setting is on for the church (and One Discuva sign-in too). Member-app routes act on the signed-in member's Discuva profile.",
+      "item": [
+        {
+          "name": "Agree to share my profile here",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/consent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "consent"
+              ]
+            },
+            "description": "One-time agreement for people linked before Global Profile asked for it (status shows needsConsent).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Choose between differing details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/details",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "details"
+              ]
+            },
+            "description": "Answers detailsToConfirm from GET /auth/account: for each field keep YOURS (the profile's) or HERE (this church's). Written to the profile and every church.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"choices\": {\n    \"phoneNumber\": \"YOURS\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My milestones",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/milestones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "milestones"
+              ]
+            },
+            "description": "The person's milestones, newest first, hidden ones included.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add a milestone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/milestones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "milestones"
+              ]
+            },
+            "description": "type: SALVATION, BAPTISM, MEMBERSHIP_CLASS, WORKERS_TRAINING, MARRIAGE or OTHER (needs title). visibility: PRIVATE or CHURCHES (default).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SALVATION\",\n  \"year\": 2008,\n  \"placeName\": \"Youth camp\",\n  \"visibility\": \"CHURCHES\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Edit a milestone",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/milestones/{{milestoneId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "milestones",
+                "{{milestoneId}}"
+              ]
+            },
+            "description": "Church-recorded milestones accept only hidden and visibility; anything else is 403.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hidden\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a milestone",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/milestones/{{milestoneId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "milestones",
+                "{{milestoneId}}"
+              ]
+            },
+            "description": "Only milestones the person added; a church-recorded one is 403.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Member's milestones (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/milestones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "milestones"
+              ]
+            },
+            "description": "MEMBERS_READ. Only milestones shared with churches and not hidden; empty for people without a profile.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record a baptism (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/milestones/baptism",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "milestones",
+                "baptism"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Sets the church's year baptized; records the milestone for an account holder.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"month\": 6,\n  \"year\": 2010\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Combine another email: send codes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/merge/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "merge",
+                "start"
+              ]
+            },
+            "description": "Sends a code to this account's email and to the other one.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ada.old@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Combine another email: confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/merge/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "merge",
+                "confirm"
+              ]
+            },
+            "description": "Moves the other account's churches, milestones and photo history onto this account, then removes it.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ada.old@example.com\",\n  \"codeHere\": \"123456\",\n  \"codeOther\": \"654321\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Your data (PDF)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/data.pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "data.pdf"
+              ]
+            },
+            "description": "Discuva-branded PDF of the profile, milestones and churches.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Your data (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/data.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "data.json"
+              ]
+            },
+            "description": "The same content as JSON.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete my Discuva account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "delete"
+              ]
+            },
+            "description": "Starts the grace period (account_delete_grace_days); a delayed job deletes it. Emails a keep link.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"Str0ng!pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel deleting my account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/delete/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "delete",
+                "cancel"
+              ]
+            },
+            "description": "Signed in, during the grace period.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Keep my account (from email)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/keep",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "keep"
+              ]
+            },
+            "description": "Public. The link in the deletion email.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"{{accountId}}\",\n  \"token\": \"{{linkToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Photo reports (Platform)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/photo-reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "photo-reports"
+              ]
+            },
+            "description": "TENANTS_READ. People whose photo admins removed at least photo_report_removals times within photo_report_window_days.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
           },
           "response": []
         }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AccountRecoveryController } from './controller/account-recovery.controller';
 import { AccountRecoveryService } from './service/account-recovery.service';
+import { AccountMergeService } from './service/account-merge.service';
 import { AccountController } from './controller/account.controller';
 import { AccountSignInService } from './service/account-sign-in.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -50,6 +51,7 @@ import { UtilityModule } from '../utility/utility.module';
     AuthService,
     AccountSignInService,
     AccountRecoveryService,
+    AccountMergeService,
     WebauthnService,
     LocalStrategy,
     JwtStrategy,

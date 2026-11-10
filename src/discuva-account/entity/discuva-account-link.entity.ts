@@ -27,4 +27,8 @@ export class DiscuvaAccountLink {
 
   @CreateDateColumn({ type: 'timestamptz' })
   linkedAt: Date;
+
+  // When the person agreed to share their Discuva profile with this church.
+  @Column({ type: 'timestamptz', nullable: true })
+  consentedAt: Date | null;
 }

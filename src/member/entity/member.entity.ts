@@ -113,6 +113,18 @@ export class Member extends BaseEntity {
   })
   anniversaryGreetedYear: number | null;
 
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  address: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  emergencyContactName: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  emergencyContactPhone: string | null;
+
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  emergencyContactRelationship: string | null;
+
   @Column({ nullable: true })
   photoUrl: string | null;
 

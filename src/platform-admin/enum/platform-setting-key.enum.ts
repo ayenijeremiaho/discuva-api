@@ -42,6 +42,10 @@ export enum PlatformSettingKey {
   ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
   ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
   ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
+  DISCUVA_PROFILE_MODE = 'discuva_profile_mode',
+  PHOTO_REPORT_REMOVALS = 'photo_report_removals',
+  PHOTO_REPORT_WINDOW_DAYS = 'photo_report_window_days',
+  ACCOUNT_DELETE_GRACE_DAYS = 'account_delete_grace_days',
   // Sign-in limits; until set here they follow the matching environment variables.
   LOGIN_MAX_ATTEMPTS = 'login_max_attempts',
   LOGIN_LOCK_MINUTES = 'login_lock_minutes',

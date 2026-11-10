@@ -89,6 +89,24 @@ export interface GivingStatementLine {
   reference: string | null;
 }
 
+export interface AccountDataPdf {
+  name: string;
+  timezone: string;
+  exportedAt: Date;
+  accountCreatedAt: Date;
+  photoUrl: string | null;
+  // Label and value, in reading order.
+  profile: [string, string][];
+  milestones: {
+    when: string;
+    what: string;
+    where: string;
+    recordedBy: string;
+    shownTo: string;
+  }[];
+  churches: { name: string; linkedAt: Date }[];
+}
+
 export interface ClassCertificatePdf {
   recipientName: string;
   className: string;
@@ -179,28 +197,197 @@ export class PdfService {
   ): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
     return this.cacheService.getOrSet(
       `pdf-logo-image:${logoUrl}`,
-      async () => {
-        try {
-          const res = await fetch(logoUrl);
-          if (!res.ok) return null;
-          const contentType = res.headers.get('content-type') ?? '';
-          const format = contentType.includes('png')
-            ? 'PNG'
-            : contentType.includes('jpeg') || contentType.includes('jpg')
-              ? 'JPEG'
-              : null;
-          if (!format) return null;
-          const buffer = Buffer.from(await res.arrayBuffer());
-          return {
-            dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
-            format: format as 'PNG' | 'JPEG',
-          };
-        } catch {
-          return null;
-        }
-      },
+      () => this.fetchImage(logoUrl),
       this.cacheTtl,
     );
+  }
+
+  private async fetchImage(
+    url: string,
+  ): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') ?? '';
+      const format = contentType.includes('png')
+        ? 'PNG'
+        : contentType.includes('jpeg') || contentType.includes('jpg')
+          ? 'JPEG'
+          : null;
+      if (!format) return null;
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return {
+        dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
+        format,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // The person's own copy of their Discuva account: Discuva's look, not any one church's.
+  async generateAccountData(data: AccountDataPdf): Promise<Buffer> {
+    const branding: PdfBranding = {
+      churchName: 'Discuva',
+      churchAddress: 'Your own copy of what your Discuva account holds',
+      churchTagline: 'Your data',
+      currencyCode: '',
+      currencyLocale: 'en-GB',
+      logoImage: null,
+      timezone: data.timezone,
+      theme: churchThemeColors(null),
+      wording: [],
+    };
+    const photo = data.photoUrl ? await this.fetchImage(data.photoUrl) : null;
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+    this.drawAccountData(doc, data, branding, photo);
+    return Buffer.from(doc.output('arraybuffer'));
+  }
+
+  private drawAccountData(
+    doc: jsPDF,
+    data: AccountDataPdf,
+    branding: PdfBranding,
+    photo: { dataUrl: string; format: 'PNG' | 'JPEG' } | null,
+  ): void {
+    let y = this.drawPageHeader(doc, 'Your Discuva Data', branding);
+    y = this.drawAccentBand(
+      doc,
+      branding.theme,
+      y,
+      data.name,
+      `Downloaded ${this.fmtDate(data.exportedAt, data.timezone)}`,
+      'Account since',
+      this.fmtDate(data.accountCreatedAt, data.timezone),
+    );
+
+    y += 8;
+    y = this.drawAccountSectionTitle(doc, y, 'Profile');
+    let gridX = 0;
+    if (photo) {
+      try {
+        doc.addImage(photo.dataUrl, photo.format, MARGIN, y, 24, 24);
+        gridX = 28;
+      } catch {
+        gridX = 0;
+      }
+    }
+    const gridTop = y + 2;
+    const pairs = data.profile;
+    const colW = (CONTENT_W - gridX) / 2;
+    pairs.forEach(([label, value], i) => {
+      const x = MARGIN + gridX + (i % 2) * colW;
+      const row = gridTop + Math.floor(i / 2) * 9;
+      doc
+        .setFont('helvetica', 'normal')
+        .setFontSize(8)
+        .setTextColor(MUTED)
+        .text(label, x, row);
+      doc
+        .setFont('helvetica', 'bold')
+        .setFontSize(9)
+        .setTextColor(DARK)
+        .text(doc.splitTextToSize(value || '—', colW - 4)[0], x, row + 4);
+    });
+    y =
+      Math.max(
+        gridTop + Math.ceil(pairs.length / 2) * 9,
+        y + (photo ? 26 : 0),
+      ) + 6;
+
+    y = this.drawAccountSectionTitle(doc, y, 'Milestones');
+    if (data.milestones.length) {
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN, bottom: 22 },
+        head: [['When', 'Milestone', 'Where', 'Recorded by', 'Shown to']],
+        body: data.milestones.map((m) => [
+          m.when || '—',
+          m.what,
+          m.where || '—',
+          m.recordedBy,
+          m.shownTo,
+        ]),
+        headStyles: {
+          fillColor: branding.theme.accent,
+          textColor: DARK,
+          fontStyle: 'bold',
+          fontSize: 9,
+        },
+        bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
+        alternateRowStyles: { fillColor: branding.theme.soft },
+      });
+      y = this.tableEnd(doc) + 8;
+    } else {
+      y = this.drawAccountNote(doc, y, 'No milestones yet.') + 6;
+    }
+
+    y = this.drawAccountSectionTitle(doc, y, 'Your churches');
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN, bottom: 22 },
+      head: [['Church', 'On your account since']],
+      body: data.churches.map((c) => [
+        c.name,
+        this.fmtDate(c.linkedAt, data.timezone),
+      ]),
+      headStyles: {
+        fillColor: branding.theme.accent,
+        textColor: DARK,
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
+      alternateRowStyles: { fillColor: branding.theme.soft },
+    });
+    y = this.tableEnd(doc) + 8;
+
+    this.drawAccountNote(
+      doc,
+      y,
+      'Each church keeps its own records, such as attendance and giving. Ask that church for a copy.',
+    );
+    this.drawPageFooter(doc, branding);
+  }
+
+  private drawAccountSectionTitle(
+    doc: jsPDF,
+    y: number,
+    title: string,
+  ): number {
+    if (y > 260) {
+      doc.addPage();
+      y = 20;
+    }
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(11)
+      .setTextColor(DARK)
+      .text(title, MARGIN, y);
+    return y + 5;
+  }
+
+  private drawAccountNote(doc: jsPDF, y: number, text: string): number {
+    if (y > 268) {
+      doc.addPage();
+      y = 20;
+    }
+    const lines = doc.splitTextToSize(text, CONTENT_W);
+    doc
+      .setFont('helvetica', 'normal')
+      .setFontSize(9)
+      .setTextColor(MUTED)
+      .text(lines, MARGIN, y);
+    return y + lines.length * 4.5;
+  }
+
+  private tableEnd(doc: jsPDF): number {
+    return (doc as unknown as { lastAutoTable: { finalY: number } })
+      .lastAutoTable.finalY;
   }
 
   // Landscape certificate of completion for a training class, in the church's branding.

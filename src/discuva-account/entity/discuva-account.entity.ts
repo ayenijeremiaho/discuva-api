@@ -29,4 +29,8 @@ export class DiscuvaAccount extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   recoveredAt: Date | null;
+
+  // Set while a deletion waits out its grace period; cleared if the person cancels.
+  @Column({ type: 'timestamptz', nullable: true })
+  deleteRequestedAt: Date | null;
 }

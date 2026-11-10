@@ -34,6 +34,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { GuestService } from './guest.service';
+import { MilestoneService } from '../../discuva-account/service/milestone.service';
 import { ConfigService } from '@nestjs/config';
 
 export interface ClassMaterialLibraryEntry {
@@ -78,6 +79,7 @@ export class ClassesService {
     private readonly configService: ConfigService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly guestService: GuestService,
+    private readonly milestones: MilestoneService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -285,8 +287,11 @@ export class ClassesService {
         });
       if (completeOnly)
         update.andWhere('id IN (:...ids)', { ids: completeOnly });
-      const result = await update.execute();
+      const result = await update.returning(['id']).execute();
       closedEnrollments = result.affected ?? 0;
+      await this.milestones.recordClassCompletions(
+        (result.raw as { id: string }[]).map((r) => r.id),
+      );
     }
 
     churchClass.status = ChurchClassStatusEnum.CLOSED;
@@ -699,6 +704,9 @@ export class ClassesService {
     }
 
     const saved = await this.enrollmentRepo.save(enrollment);
+    if (status === EnrollmentStatusEnum.COMPLETED) {
+      await this.milestones.recordClassCompletions([saved.id]);
+    }
     this.logger.log(`Enrollment ${enrollmentId} status updated to ${status}`);
     return saved;
   }
