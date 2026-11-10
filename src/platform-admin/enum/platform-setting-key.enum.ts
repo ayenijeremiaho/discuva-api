@@ -43,6 +43,8 @@ export enum PlatformSettingKey {
   ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
   ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
   DISCUVA_PROFILE_MODE = 'discuva_profile_mode',
+  CHURCH_NETWORK_MODE = 'church_network_mode',
+  NETWORK_MAX_LEVELS = 'network_max_levels',
   PHOTO_REPORT_REMOVALS = 'photo_report_removals',
   PHOTO_REPORT_WINDOW_DAYS = 'photo_report_window_days',
   ACCOUNT_DELETE_GRACE_DAYS = 'account_delete_grace_days',

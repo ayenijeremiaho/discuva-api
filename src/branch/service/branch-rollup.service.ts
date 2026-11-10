@@ -45,23 +45,9 @@ export interface BranchOverviewItem {
   attendanceRate: number | null;
   totalGiving: number | null;
   computedAt: Date | null;
-  // False means this branch has shareDataWithParent off — every stat above
-  // is null, not because nothing's been computed, but because the branch
-  // hasn't consented to share it with this parent.
-  sharingEnabled: boolean;
   // Only meaningful when sharingEnabled is true — a branch can share
   // engagement stats while still keeping giving specifically private.
   givingShared: boolean;
-}
-
-export interface BranchSharingConsent {
-  shareDataWithParent: boolean;
-  shareGivingWithParent: boolean;
-  // Null means this tenant isn't a branch of anything right now — the
-  // frontend's only way to know whether "Leave Parent" is even relevant to
-  // show, short of calling leaveParent() itself and handling its 400.
-  parentTenantId: string | null;
-  parentTenantName: string | null;
 }
 
 // Computes and upserts ONE tenant's own tenant_rollups row, run from inside
@@ -120,20 +106,6 @@ export class BranchRollupService {
     const rollupByTenantId = new Map(rollups.map((r) => [r.tenantId, r]));
 
     return branches.map((branch) => {
-      if (!branch.shareDataWithParent) {
-        return {
-          tenantId: branch.id,
-          name: branch.name,
-          subdomain: branch.subdomain,
-          memberCount: null,
-          attendanceRate: null,
-          totalGiving: null,
-          computedAt: null,
-          sharingEnabled: false,
-          givingShared: false,
-        };
-      }
-
       const rollup = rollupByTenantId.get(branch.id);
       return {
         tenantId: branch.id,
@@ -145,104 +117,27 @@ export class BranchRollupService {
           ? (rollup?.totalGiving ?? null)
           : null,
         computedAt: rollup?.computedAt ?? null,
-        sharingEnabled: true,
         givingShared: branch.shareGivingWithParent,
       };
     });
   }
 
-  // Self-service — a branch's own admin controlling what a parent can see,
-  // never settable by the parent itself.
-  async getSharingConsent(): Promise<BranchSharingConsent> {
-    const tenantId = this.currentTenantId();
-    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
-    return this.toSharingConsent(tenant);
-  }
-
-  async updateSharingConsent(
-    dto: Partial<
-      Pick<
-        BranchSharingConsent,
-        'shareDataWithParent' | 'shareGivingWithParent'
-      >
-    >,
-  ): Promise<BranchSharingConsent> {
-    const tenantId = this.currentTenantId();
-    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
-    if (dto.shareDataWithParent !== undefined) {
-      tenant.shareDataWithParent = dto.shareDataWithParent;
-    }
-    if (dto.shareGivingWithParent !== undefined) {
-      tenant.shareGivingWithParent = dto.shareGivingWithParent;
-    }
-    await this.tenantRepo.save(tenant);
-    return this.toSharingConsent(tenant);
-  }
-
-  private async toSharingConsent(
-    tenant: Tenant,
-  ): Promise<BranchSharingConsent> {
-    const parent = tenant.parentTenantId
-      ? await this.tenantRepo.findOneBy({ id: tenant.parentTenantId })
-      : null;
-    return {
-      shareDataWithParent: tenant.shareDataWithParent,
-      shareGivingWithParent: tenant.shareGivingWithParent,
-      parentTenantId: tenant.parentTenantId,
-      parentTenantName: parent?.name ?? null,
-    };
-  }
-
-  // Parent-initiated — detaches one of ITS OWN branches. Revokes a
-  // sponsored plan on the way out (below) since continuing free access
-  // sponsored by a parent it's no longer affiliated with makes no sense.
-  async unlinkBranch(branchTenantId: string): Promise<void> {
-    const parentTenantId = this.currentTenantId();
-    const branch = await this.tenantRepo.findOneBy({
-      id: branchTenantId,
-      parentTenantId,
+  // Network figures always reach the churches above; only giving is the branch's own choice.
+  async getGivingSharing(): Promise<{ shareGivingWithParent: boolean }> {
+    const tenant = await this.tenantRepo.findOneOrFail({
+      where: { id: this.currentTenantId() },
+      select: { id: true, shareGivingWithParent: true },
     });
-    if (!branch) {
-      throw new NotFoundException(
-        'Branch not found, or not linked to this tenant.',
-      );
-    }
-    branch.parentTenantId = null;
-    await this.tenantRepo.save(branch);
-    await this.revokeSponsorshipIfSponsoredBy(branch.id, parentTenantId);
+    return { shareGivingWithParent: tenant.shareGivingWithParent };
   }
 
-  // Branch-initiated — the CURRENT tenant leaves its own parent. Either
-  // side of the relationship can end it; a branch isn't locked into a
-  // parent it no longer wants, same as a parent isn't locked into a branch
-  // it no longer wants (unlinkBranch above).
-  async leaveParent(): Promise<void> {
-    const tenantId = this.currentTenantId();
-    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
-    if (!tenant.parentTenantId) {
-      throw new BadRequestException(
-        'This tenant is not currently a branch of any parent.',
-      );
-    }
-    const formerParentId = tenant.parentTenantId;
-    tenant.parentTenantId = null;
-    await this.tenantRepo.save(tenant);
-    await this.revokeSponsorshipIfSponsoredBy(tenantId, formerParentId);
-  }
-
-  private async revokeSponsorshipIfSponsoredBy(
-    tenantId: string,
-    sponsorTenantId: string,
-  ): Promise<void> {
-    const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
-    if (subscription?.sponsoredByTenantId !== sponsorTenantId) return;
-
-    subscription.planId = await tenantFreePlanId(this.tenantRepo, tenantId);
-    subscription.status = SubscriptionStatus.CANCELED;
-    subscription.canceledAt = new Date();
-    subscription.sponsoredByTenantId = null;
-    await this.subscriptionRepo.save(subscription);
-    this.cacheService.del(`plan-features:${tenantId}`);
+  async setGivingSharing(
+    shareGivingWithParent: boolean,
+  ): Promise<{ shareGivingWithParent: boolean }> {
+    await this.tenantRepo.update(this.currentTenantId(), {
+      shareGivingWithParent,
+    });
+    return { shareGivingWithParent };
   }
 
   async computeAndUpsertOne(tenant: Tenant): Promise<void> {

@@ -3,16 +3,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Subscription } from '../billing/entity/subscription.entity';
-import { TenantBranchInvite } from './entity/tenant-branch-invite.entity';
-import { TenantBranchLinkRequest } from './entity/tenant-branch-link-request.entity';
+import { NetworkLevel } from './entity/network-level.entity';
+import { NetworkMove } from './entity/network-move.entity';
 import { TenantRollup } from './entity/tenant-rollup.entity';
 import { Member } from '../member/entity/member.entity';
 import { Attendance } from '../attendance/entity/attendance.entity';
 import { TitheRecord } from '../tithe/entity/tithe-record.entity';
 import { BranchController } from './controller/branch.controller';
-import { BranchInviteService } from './service/branch-invite.service';
 import { BranchRollupService } from './service/branch-rollup.service';
-import { BranchLinkRequestService } from './service/branch-link-request.service';
+import { NetworkService } from './service/network.service';
+import { NetworkController } from './controller/network.controller';
+import { TenantModule } from '../tenant/tenant.module';
 import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
 
 @Module({
@@ -20,8 +21,8 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     // Control-plane entities — public, never a search_path target.
     TypeOrmModule.forFeature([
       Tenant,
-      TenantBranchInvite,
-      TenantBranchLinkRequest,
+      NetworkLevel,
+      NetworkMove,
       TenantRollup,
       Subscription,
     ]),
@@ -30,14 +31,10 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     // reason every other module owning tenant-schema tables uses this
     // instead of plain TypeOrmModule.forFeature (docs/MULTI_TENANT_MIGRATION.md §4.4).
     TenantTypeOrmModule.forFeature([Member, Attendance, TitheRecord]),
+    TenantModule,
   ],
-  controllers: [BranchController],
-  providers: [
-    BranchInviteService,
-    BranchRollupService,
-    BranchLinkRequestService,
-    BranchRollupScheduler,
-  ],
-  exports: [BranchInviteService],
+  controllers: [BranchController, NetworkController],
+  providers: [BranchRollupService, NetworkService, BranchRollupScheduler],
+  exports: [NetworkService],
 })
 export class BranchModule {}

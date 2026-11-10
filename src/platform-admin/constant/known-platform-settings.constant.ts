@@ -185,6 +185,20 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 0,
     max: 2,
   },
+  [PlatformSettingKey.CHURCH_NETWORK_MODE]: {
+    label: 'Church Networks',
+    unit: '0 = off, 1 = test churches only (DISCUVA_ACCOUNT_TEST_TENANTS), 2 = every verified church',
+    defaultValue: 0,
+    min: 0,
+    max: 2,
+  },
+  [PlatformSettingKey.NETWORK_MAX_LEVELS]: {
+    label: 'Levels in a Church Network',
+    unit: 'levels, counting the top church',
+    defaultValue: 5,
+    min: 2,
+    max: 8,
+  },
   [PlatformSettingKey.PHOTO_REPORT_REMOVALS]: {
     label: 'Photo Removals Before a Report',
     unit: 'photos admins remove from one person before it shows under Photo reports',

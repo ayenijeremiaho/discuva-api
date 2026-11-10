@@ -22,6 +22,8 @@ const mockTenantRepo = {
   findOne: jest.fn().mockResolvedValue({ orgType: 'CHURCH' }),
   findOneBy: jest.fn(),
   findOneByOrFail: jest.fn(),
+  findOneOrFail: jest.fn(),
+  update: jest.fn(),
   save: jest.fn(),
 };
 const mockRollupRepo = { save: jest.fn(), findBy: jest.fn() };
@@ -191,7 +193,6 @@ describe('BranchRollupService', () => {
           tenantId: 'branch-1',
           memberCount: 50,
           totalGiving: 100000,
-          sharingEnabled: true,
           givingShared: true,
         }),
         expect.objectContaining({
@@ -200,47 +201,8 @@ describe('BranchRollupService', () => {
           attendanceRate: null,
           totalGiving: null,
           computedAt: null,
-          sharingEnabled: true,
           givingShared: false,
         }),
-      ]);
-    });
-
-    it('nulls out every stat for a branch that has not consented to share data at all', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.find.mockResolvedValue([
-        {
-          id: 'branch-1',
-          name: 'Branch One',
-          subdomain: 'branch-one',
-          shareDataWithParent: false,
-          shareGivingWithParent: false,
-        },
-      ]);
-      mockRollupRepo.findBy.mockResolvedValue([
-        {
-          tenantId: 'branch-1',
-          memberCount: 50,
-          attendanceRate: 75,
-          totalGiving: 100000,
-          computedAt: new Date('2026-08-01'),
-        },
-      ]);
-
-      const result = await service.getOverview();
-
-      expect(result).toEqual([
-        {
-          tenantId: 'branch-1',
-          name: 'Branch One',
-          subdomain: 'branch-one',
-          memberCount: null,
-          attendanceRate: null,
-          totalGiving: null,
-          computedAt: null,
-          sharingEnabled: false,
-          givingShared: false,
-        },
       ]);
     });
 
@@ -272,162 +234,24 @@ describe('BranchRollupService', () => {
     });
   });
 
-  describe('getSharingConsent', () => {
-    it('returns the current tenant sharing flags with no parent info when not a branch', async () => {
-      mockCls.get.mockReturnValue('tenant-1');
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        shareDataWithParent: true,
+  describe('giving sharing', () => {
+    it("reads and sets only this church's own choice", async () => {
+      mockCls.get.mockReturnValue('branch-1');
+      mockTenantRepo.findOneOrFail.mockResolvedValue({
+        id: 'branch-1',
         shareGivingWithParent: false,
-        parentTenantId: null,
       });
-      const result = await service.getSharingConsent();
-      expect(result).toEqual({
-        shareDataWithParent: true,
+      mockTenantRepo.update.mockResolvedValue(undefined);
+
+      await expect(service.getGivingSharing()).resolves.toEqual({
         shareGivingWithParent: false,
-        parentTenantId: null,
-        parentTenantName: null,
       });
-      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
-    });
-
-    it('resolves and returns the parent tenant name when this tenant is a branch', async () => {
-      mockCls.get.mockReturnValue('tenant-1');
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        shareDataWithParent: true,
-        shareGivingWithParent: false,
-        parentTenantId: 'parent-1',
-      });
-      mockTenantRepo.findOneBy.mockResolvedValue({
-        id: 'parent-1',
-        name: 'Parent Church',
-      });
-
-      const result = await service.getSharingConsent();
-
-      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({
-        id: 'parent-1',
-      });
-      expect(result).toEqual({
-        shareDataWithParent: true,
-        shareGivingWithParent: false,
-        parentTenantId: 'parent-1',
-        parentTenantName: 'Parent Church',
-      });
-    });
-  });
-
-  describe('updateSharingConsent', () => {
-    it('applies only the provided fields', async () => {
-      mockCls.get.mockReturnValue('tenant-1');
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        shareDataWithParent: true,
-        shareGivingWithParent: false,
-        parentTenantId: null,
-      });
-      mockTenantRepo.save.mockImplementation((t) => t);
-
-      const result = await service.updateSharingConsent({
+      await expect(service.setGivingSharing(true)).resolves.toEqual({
         shareGivingWithParent: true,
       });
-
-      expect(result).toEqual({
-        shareDataWithParent: true,
+      expect(mockTenantRepo.update).toHaveBeenCalledWith('branch-1', {
         shareGivingWithParent: true,
-        parentTenantId: null,
-        parentTenantName: null,
       });
-    });
-  });
-
-  describe('unlinkBranch', () => {
-    it('throws NotFoundException when the branch is not linked to this tenant', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.findOneBy.mockResolvedValue(null);
-      await expect(service.unlinkBranch('branch-1')).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it('nulls parentTenantId and revokes a sponsorship from this parent', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.findOneBy.mockResolvedValue({
-        id: 'branch-1',
-        parentTenantId: 'parent-1',
-      });
-      mockTenantRepo.save.mockResolvedValue({});
-      mockSubscriptionRepo.findOneBy.mockResolvedValue({
-        tenantId: 'branch-1',
-        planId: 'pro',
-        sponsoredByTenantId: 'parent-1',
-      });
-      mockSubscriptionRepo.save.mockResolvedValue({});
-
-      await service.unlinkBranch('branch-1');
-
-      expect(mockTenantRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ parentTenantId: null }),
-      );
-      expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          planId: 'free',
-          status: SubscriptionStatus.CANCELED,
-          sponsoredByTenantId: null,
-        }),
-      );
-      expect(mockCacheService.del).toHaveBeenCalledWith(
-        'plan-features:branch-1',
-      );
-    });
-
-    it('leaves a non-sponsored subscription alone', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.findOneBy.mockResolvedValue({
-        id: 'branch-1',
-        parentTenantId: 'parent-1',
-      });
-      mockTenantRepo.save.mockResolvedValue({});
-      mockSubscriptionRepo.findOneBy.mockResolvedValue({
-        tenantId: 'branch-1',
-        planId: 'pro',
-        sponsoredByTenantId: null,
-      });
-
-      await service.unlinkBranch('branch-1');
-      expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('leaveParent', () => {
-    it('throws BadRequestException when this tenant has no parent', async () => {
-      mockCls.get.mockReturnValue('tenant-1');
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        id: 'tenant-1',
-        parentTenantId: null,
-      });
-      await expect(service.leaveParent()).rejects.toThrow(BadRequestException);
-    });
-
-    it('nulls its own parentTenantId and revokes sponsorship from the former parent', async () => {
-      mockCls.get.mockReturnValue('tenant-1');
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        id: 'tenant-1',
-        parentTenantId: 'parent-1',
-      });
-      mockTenantRepo.save.mockResolvedValue({});
-      mockSubscriptionRepo.findOneBy.mockResolvedValue({
-        tenantId: 'tenant-1',
-        sponsoredByTenantId: 'parent-1',
-      });
-      mockSubscriptionRepo.save.mockResolvedValue({});
-
-      await service.leaveParent();
-
-      expect(mockTenantRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ parentTenantId: null }),
-      );
-      expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ sponsoredByTenantId: null }),
-      );
     });
   });
 });

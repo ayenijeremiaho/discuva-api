@@ -2638,137 +2638,33 @@ reported MRR reflects comps; `GET /platform/tenants` also returns the four disco
 MRR is grouped by `Plan.currency` (`[{ currency, mrrCents }]`), never blended into one figure — same reasoning as
 giving totals below: an NGN-priced and a USD-priced subscription summed together would be meaningless.
 
-### Branch Hierarchy (`src/branch/`)
+### Church networks (`src/branch/`, Phase 4)
 
-Lets a parent church invite another church to join as a branch, and see a rollup of its branches' member
-count/attendance/giving — `docs/MULTI_TENANT_MIGRATION.md` §11's "local compute, pushed rollups" design, now built.
-A branch is a tenant like any other (own schema, own admin, own everything) — the only difference is
-`tenants.parent_tenant_id` is set.
+A network is a **tree of churches** under one top church. Each church is still its own tenant with its own schema, admins, roles and settings. The tree lives on the root `tenants` table: `parent_tenant_id` (its parent), `network_root_id` (the top church; the top church points at itself) and `network_label` (its short name in the path, e.g. "Ikeja"). Index `idx_tenants_network_root (network_root_id, parent_tenant_id)`. One indexed read loads a whole network; depth, path and "everything under this church" are worked out in memory (`NetworkService.loadTree`). Nothing reads inside another church's schema.
 
-**Onboarding:** parent admin `POST /branch/invites` (email) generates a 64-char opaque token (not a JWT — has to be
-looked up by value later, not decoded), emails it, and records a `pending` row in `tenant_branch_invites`
-(`public` schema — has to live there since the invited church has no tenant of its own yet, the very thing the
-invite exists to create). `POST /signup` accepts an optional `branchInviteToken`; `SignupController` resolves and
-validates it (pending, unexpired) *before* enqueueing provisioning, so a bad/expired code fails fast without
-creating a tenant row. `TenantProvisioningProcessor` only marks the invite `accepted` *after* provisioning actually
-succeeds (see "Async Tenant Provisioning + Onboarding State Machine" above) — a subdomain collision or any other
-provisioning failure leaves the invite still usable for a retry rather than burning it.
+**Switch:** platform setting `church_network_mode` (0 off, 1 test churches in `DISCUVA_ACCOUNT_TEST_TENANTS`, 2 on), read with `DiscuvaAccountService.readModeOn`. **Levels:** `network_max_levels` (default 5, counting the top church).
 
-**Plan sponsorship (`sponsorPlan`, optional on `POST /branch/invites`):** the parent's stated intent, carried on
-the invite row and resolved at signup time — `BranchInviteService.resolveInvite()` returns a `sponsoredPlanId` when
-`sponsorPlan` was true *and* the parent currently has a paid (non-`free`) subscription; a parent on Free has nothing
-to sponsor onto, so this silently falls back to the normal independent Free-tier signup rather than erroring. When
-set, `TenantProvisioningService.provision()` creates the branch's `Subscription` directly on that plan with
-`sponsoredByTenantId` pointing at the parent — no checkout, no independent payment. See Billing & Checkout above for
-how sponsorship affects cancellation (blocked — it isn't the branch's plan to cancel) and MRR (excluded).
+**Starting a network and adding branches:** `POST /network/branches` (BRANCH_WRITE, owners only) adds a branch under the current church.
+- **Who can start one:** a verified church (`verification_status = VERIFIED`, `org_type = CHURCH`). Adding its first branch turns it into a top church.
+- **Address:** made from the network's address plus the label (`branchAddress()`: `abc` + "Lagos Island" → `abc-lagos-island`, with `-2`… if taken). It is created once and never changes, even after moves, because the middle of the path is never in it.
+- **Creating the church:** `TenantProvisioningService.provision` with `parentTenantId` and no password, so the first owner gets the usual welcome email with a set-password link. The new church copies the top church's `org_type`, verification and `theme_preset`.
+- **Plan:** Free, unless `sponsor: true` and the adding church is on a paid plan (sponsored subscription, as before).
+- **Logging:** onboarding event `NETWORK_BRANCH_CREATED`; audit `NETWORK_BRANCH_ADDED`.
 
-**Rollup computation (`BranchRollupScheduler`, daily 03:00 church time, distributed-lock guarded):** iterates every
-active tenant — not just ones with a parent, since a branch invited later still needs history once linked — and for
-each one manually enters that tenant's CLS/transaction context (`BranchRollupService.computeAndUpsertOne`, same
-mechanism as `YoutubeLiveDetectionService`/`PlatformTenantService.impersonateTenant`) to compute:
+**Moving:** `PATCH /network/churches/:id/parent` (`{ parentId }`, owners) moves a church and everything under it.
+- **Who can move what:** the moved church and its new parent must both be in the network, and the old and new parents must both be under the current church (or be it). So the top church can move anything, and a region only within its own branches.
+- **Refused:** the top church itself, a loop (moving under one of its own branches), and anything that would pass the level cap (new parent's depth plus the height of the moved subtree).
+- **Logging:** root table `network_moves`; audit `NETWORK_CHURCH_MOVED`. The address is untouched.
 
-| Field | Definition |
-|-------|------------|
-| `memberCount` | Count of `members` with `status = ACTIVE` |
-| `attendanceRate` | Same PRESENT/LATE/ATTENDED_ONLINE-over-a-window definition `AttendanceService.getMyAttendanceSummary` already uses per-member (ON_LEAVE excluded from both numerator and denominator), aggregated church-wide over the last 30 days instead. `null` when there are zero attendance rows in the window, not `0` |
-| `totalGiving` | Sum of `tithe_records.amount` |
+**Level names:** `PUT /network/levels` (`{ names }`, owners of the top church) stores `network_levels (network_root_id, depth, name)`. Index 0 names depth 2, and so on down. They are labels only. Where a level has no name, a church shows as "Region" if it has branches and "Branch" if not.
 
-The public `tenant_rollups` row is upserted *outside* the tenant-context block (same convention as
-`YoutubeLiveDetectionService`'s own public-row update) using the plain, non-tenant-scoped repository.
+**Reading:** `GET /network` (BRANCH_READ) returns `{ available, inNetwork, canAddBranch, reasonCannotAdd, isTop, me, ancestors, nodes, levels, maxLevels, recentMoves }`. `ancestors` is the chain up to the top; `nodes` is the current church and everything under it, never the rest of the network. Each node is `{ id, name, subdomain, label, parentId, depth, levelName, path, childCount, isActive }`, with `path` like "ABC · Lagos · Ikeja". `GET /network/address?label=` previews a new branch's address.
 
-**Parent-side overview (`GET /branch/overview`):** reads only `tenants WHERE parent_tenant_id = :self` joined
-against `tenant_rollups` — never reaches into a branch's schema or shard directly, no cross-tenant read path exists
-in this class at all to get wrong (§11.2).
+**Addresses for everyone else:** hyphens are kept for branch addresses. Sign-up, the sign-up live check (`GET /signup/subdomain-availability`) and console church creation accept only `^[a-z0-9]{1,63}$`. `checkSubdomain(sub, { allowHyphen: true })` is used only by the Network page. Existing hyphenated churches keep working as standalone.
 
-**Sharing consent (`tenants.share_data_with_parent`, `tenants.share_giving_with_parent`):** without this, a
-branch's rollup became visible to its parent the instant an invite was accepted, with no notice or opt-out.
-Self-service, settable only by the branch's own admin via `GET`/`PATCH /branch/sharing-consent` — never by the
-parent. Gates *visibility* at `getOverview()`, not *computation* — `computeAndUpsertOne` still computes and stores
-every branch's real numbers regardless (a branch's own `tenant_rollups` row is its own data, useful for its own
-future views too); consent only controls what's exposed to a specific parent. `shareDataWithParent` defaults `true`
-(being a branch structurally implies a reporting relationship — that's the point of the feature, and the admin who
-accepted the invite already knows a parent relationship is being formed) and gates every stat when `false` (all
-fields `null`, `sharingEnabled: false` in the response — the parent still sees the branch exists, since they
-invited it, just not its numbers). `shareGivingWithParent` defaults `false` **regardless of the main flag** — giving
-specifically stays opt-in even when general sharing is on, matching how sensitive individual church finances are
-treated everywhere else in this codebase (dedicated `TITHE_READ` permission, PII-scrubbing conventions).
+**Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
 
-**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
-one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
-(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
-locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
-(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
-relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
-make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched.
-
-**Linking an already-onboarded tenant as a branch (`TenantBranchLinkRequest`, `src/branch/service/branch-link-request.service.ts`):**
-the invite flow above only covers a church that doesn't have a tenant yet — it can't be reused for two churches that
-are *already* separate, fully-onboarded tenants, since there's no signup step left to attach a token to. This is a
-two-sided negotiation between two existing tenants instead: a would-be parent's admin sends a request naming the
-target's subdomain (`POST /branch/link-requests`), and nothing about either tenant changes until the **target's own
-admin**, from inside their own tenant context, explicitly accepts or declines it (`POST
-/branch/link-requests/:id/accept`/`/decline`) — the parent cannot accept on the target's behalf, mirroring the same
-"write intent first, mutate state only on confirmed action" discipline used everywhere else BYOK/checkout-shaped
-flows appear in this codebase. `TenantBranchLinkRequest` (`public` schema, `tenant_branch_link_requests`) is the
-sibling control-plane table to `tenant_branch_invites`, keyed on `targetTenantId` instead of an email+token pair
-since the target already exists to be looked up directly.
-
-Validation at creation time: target subdomain must resolve to a real tenant, a tenant can't link itself
-(`target.id === parentTenantId`), the target can't already have a parent, and only one `pending` request between a
-given parent/target pair may exist at a time. On accept, `target.parentTenantId` is set directly (no provisioning
-involved — the target tenant already exists) and, if `sponsorPlan` was requested and the parent currently has a paid
-plan, the target's *existing* `Subscription` row is switched onto the parent's plan
-(`planId`/`status: ACTIVE`/`cancelAtPeriodEnd: false`/`sponsoredByTenantId`) — same fallback as
-`BranchInviteService.resolveInvite` if the parent is on Free (silently skipped, not an error, since `sponsorPlan` was
-only ever a request). Both sides get a best-effort email notification (target on request creation, parent on
-accept/decline) via the same manually-entered tenant-context pattern `SubscriptionLapseScheduler.findAdminEmail`
-already uses (looks up the tenant's oldest active `Admin`, ordered by `createdAt`) — reused here through the shared
-`runInTenantContext` helper rather than duplicated inline, since the recipient's admin row lives in a schema this
-service has no ambient CLS context for.
-
-A parent can have any number of branches — `getOverview()`/`listOutgoing()` are both plain unbounded
-`WHERE parentTenantId = :self` queries, and nothing in this feature restricts branch count.
-
-`GET /branch/link-requests/outgoing`/`/incoming` return `BranchLinkRequestView`, not the raw entity — the entity
-only stores `parentTenantId`/`targetTenantId` UUIDs, so both list reads batch-fetch the referenced `Tenant` rows
-(one `IN` query per list call) and enrich each row with `parentTenantName`/`targetTenantName`/`targetTenantSubdomain`
-before returning, the same way `BranchInviteService`'s invites are already human-readable via the invite's own
-`email` column.
-
-**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
-one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
-(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
-locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
-(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
-relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
-make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched. This
-applies identically regardless of whether the branch was linked via invite or via a link request — `unlinkBranch`/
-`leaveParent` only look at `Tenant.parentTenantId`/`Subscription.sponsoredByTenantId`, not how the link was formed.
-
-**Routes** (`AdminGuard`, tenant-scoped):
-
-| Method | Path                              | Permission     | Description |
-|--------|-----------------------------------|----------------|--------------|
-| POST   | `/branch/invites`                 | BRANCH_WRITE   | Body `{ email, sponsorPlan? }` — creates a pending invite, emails the invite code. `sponsorPlan: true` means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan |
-| GET    | `/branch/invites`                 | BRANCH_READ    | This tenant's own sent invites |
-| DELETE | `/branch/invites/:id`             | BRANCH_WRITE   | Revokes a `pending` invite — `400` if it's already accepted/revoked |
-| GET    | `/branch/overview`                | BRANCH_READ    | This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent |
-| GET    | `/branch/sharing-consent`         | BRANCH_READ    | This tenant's own `{ shareDataWithParent, shareGivingWithParent, parentTenantId, parentTenantName }` — the latter two are null when this tenant isn't a branch of anything, and are the only way for the frontend to know whether "Leave Parent" is relevant to show at all |
-| PATCH  | `/branch/sharing-consent`         | BRANCH_WRITE   | Body is a partial of `{ shareDataWithParent, shareGivingWithParent }` — only provided fields are applied; `parentTenantId`/`parentTenantName` are read-only and always echoed back |
-| DELETE | `/branch/:branchTenantId`         | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
-| POST   | `/branch/leave`                   | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
-| POST   | `/branch/link-requests`           | BRANCH_WRITE   | Body `{ targetSubdomain, sponsorPlan? }` — sends a link request to an already-onboarded tenant. `404` if the subdomain doesn't resolve, `400` if self-link/target already has a parent/a pending request already exists |
-| GET    | `/branch/link-requests/outgoing`  | BRANCH_READ    | Link requests this tenant has sent, as a would-be parent |
-| DELETE | `/branch/link-requests/:id`       | BRANCH_WRITE   | Parent revokes its own `pending` request — `400` if no longer pending |
-| GET    | `/branch/link-requests/incoming`  | BRANCH_READ    | Link requests sent TO this tenant by a would-be parent |
-| POST   | `/branch/link-requests/:id/accept`| BRANCH_WRITE   | Target accepts — sets `parentTenantId`, applies sponsorship if requested and the parent is on a paid plan. `400` if not pending or this tenant already has a parent |
-| POST   | `/branch/link-requests/:id/decline`| BRANCH_WRITE  | Target declines — `400` if no longer pending |
-
-Branch hierarchy UI is built in `discuva-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
-unlink, link-request sending/incoming-review, and a "this church" section showing sharing consent toggles +
-leave-parent, only shown when `parentTenantId` is actually set (see `GET /branch/sharing-consent` above).
-Multi-level hierarchy (branch-of-a-branch) is representable with zero further schema change (`parent_tenant_id` is
-self-referencing) but only flat parent → branch is exercised by anything built so far.
+**Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 
 ### Forms (`src/forms/`)
 
@@ -11760,8 +11656,7 @@ can be bypassed via `ensurePendingTenant`'s 4th param (`allowGenericSubdomain`) 
    the existing one if resuming. Callable standalone specifically so `SignupController` gets a real `tenant.id` back
    before handing off to the queue.
 2. `recordEvent(tenantId, 'SIGNUP_INITIATED', SELF_SERVE)` — see the audit trail note below.
-3. A `TENANT_PROVISIONING_JOB` is enqueued (`ProvisionTenantParams` + `tenantId` + `actorType`/`actorId` +
-   `branchInviteToken`), `attempts: 3, backoff: { type: 'exponential', delay: 5000 }` (this codebase's standard
+3. A `TENANT_PROVISIONING_JOB` is enqueued (`ProvisionTenantParams` + `tenantId` + `actorType`/`actorId`), `attempts: 3, backoff: { type: 'exponential', delay: 5000 }` (this codebase's standard
    retry convention, e.g. `TitheProcessor`).
 4. `TenantProvisioningProcessor` sets `onboardingStatus = PROVISIONING`, records `PROVISIONING_STARTED`, calls
    `provision()` (unchanged), then on success sets `onboardingStatus = ACTIVE` (`provision()` already flips
@@ -14475,8 +14370,7 @@ can be bypassed via `ensurePendingTenant`'s 4th param (`allowGenericSubdomain`) 
    the existing one if resuming. Callable standalone specifically so `SignupController` gets a real `tenant.id` back
    before handing off to the queue.
 2. `recordEvent(tenantId, 'SIGNUP_INITIATED', SELF_SERVE)` — see the audit trail note below.
-3. A `TENANT_PROVISIONING_JOB` is enqueued (`ProvisionTenantParams` + `tenantId` + `actorType`/`actorId` +
-   `branchInviteToken`), `attempts: 3, backoff: { type: 'exponential', delay: 5000 }` (this codebase's standard
+3. A `TENANT_PROVISIONING_JOB` is enqueued (`ProvisionTenantParams` + `tenantId` + `actorType`/`actorId`), `attempts: 3, backoff: { type: 'exponential', delay: 5000 }` (this codebase's standard
    retry convention, e.g. `TitheProcessor`).
 4. `TenantProvisioningProcessor` sets `onboardingStatus = PROVISIONING`, records `PROVISIONING_STARTED`, calls
    `provision()` (unchanged), then on success sets `onboardingStatus = ACTIVE` (`provision()` already flips
@@ -17084,137 +16978,33 @@ reported MRR reflects comps; `GET /platform/tenants` also returns the four disco
 MRR is grouped by `Plan.currency` (`[{ currency, mrrCents }]`), never blended into one figure — same reasoning as
 giving totals below: an NGN-priced and a USD-priced subscription summed together would be meaningless.
 
-### Branch Hierarchy (`src/branch/`)
+### Church networks (`src/branch/`, Phase 4)
 
-Lets a parent church invite another church to join as a branch, and see a rollup of its branches' member
-count/attendance/giving — `docs/MULTI_TENANT_MIGRATION.md` §11's "local compute, pushed rollups" design, now built.
-A branch is a tenant like any other (own schema, own admin, own everything) — the only difference is
-`tenants.parent_tenant_id` is set.
+A network is a **tree of churches** under one top church. Each church is still its own tenant with its own schema, admins, roles and settings. The tree lives on the root `tenants` table: `parent_tenant_id` (its parent), `network_root_id` (the top church; the top church points at itself) and `network_label` (its short name in the path, e.g. "Ikeja"). Index `idx_tenants_network_root (network_root_id, parent_tenant_id)`. One indexed read loads a whole network; depth, path and "everything under this church" are worked out in memory (`NetworkService.loadTree`). Nothing reads inside another church's schema.
 
-**Onboarding:** parent admin `POST /branch/invites` (email) generates a 64-char opaque token (not a JWT — has to be
-looked up by value later, not decoded), emails it, and records a `pending` row in `tenant_branch_invites`
-(`public` schema — has to live there since the invited church has no tenant of its own yet, the very thing the
-invite exists to create). `POST /signup` accepts an optional `branchInviteToken`; `SignupController` resolves and
-validates it (pending, unexpired) *before* enqueueing provisioning, so a bad/expired code fails fast without
-creating a tenant row. `TenantProvisioningProcessor` only marks the invite `accepted` *after* provisioning actually
-succeeds (see "Async Tenant Provisioning + Onboarding State Machine" above) — a subdomain collision or any other
-provisioning failure leaves the invite still usable for a retry rather than burning it.
+**Switch:** platform setting `church_network_mode` (0 off, 1 test churches in `DISCUVA_ACCOUNT_TEST_TENANTS`, 2 on), read with `DiscuvaAccountService.readModeOn`. **Levels:** `network_max_levels` (default 5, counting the top church).
 
-**Plan sponsorship (`sponsorPlan`, optional on `POST /branch/invites`):** the parent's stated intent, carried on
-the invite row and resolved at signup time — `BranchInviteService.resolveInvite()` returns a `sponsoredPlanId` when
-`sponsorPlan` was true *and* the parent currently has a paid (non-`free`) subscription; a parent on Free has nothing
-to sponsor onto, so this silently falls back to the normal independent Free-tier signup rather than erroring. When
-set, `TenantProvisioningService.provision()` creates the branch's `Subscription` directly on that plan with
-`sponsoredByTenantId` pointing at the parent — no checkout, no independent payment. See Billing & Checkout above for
-how sponsorship affects cancellation (blocked — it isn't the branch's plan to cancel) and MRR (excluded).
+**Starting a network and adding branches:** `POST /network/branches` (BRANCH_WRITE, owners only) adds a branch under the current church.
+- **Who can start one:** a verified church (`verification_status = VERIFIED`, `org_type = CHURCH`). Adding its first branch turns it into a top church.
+- **Address:** made from the network's address plus the label (`branchAddress()`: `abc` + "Lagos Island" → `abc-lagos-island`, with `-2`… if taken). It is created once and never changes, even after moves, because the middle of the path is never in it.
+- **Creating the church:** `TenantProvisioningService.provision` with `parentTenantId` and no password, so the first owner gets the usual welcome email with a set-password link. The new church copies the top church's `org_type`, verification and `theme_preset`.
+- **Plan:** Free, unless `sponsor: true` and the adding church is on a paid plan (sponsored subscription, as before).
+- **Logging:** onboarding event `NETWORK_BRANCH_CREATED`; audit `NETWORK_BRANCH_ADDED`.
 
-**Rollup computation (`BranchRollupScheduler`, daily 03:00 church time, distributed-lock guarded):** iterates every
-active tenant — not just ones with a parent, since a branch invited later still needs history once linked — and for
-each one manually enters that tenant's CLS/transaction context (`BranchRollupService.computeAndUpsertOne`, same
-mechanism as `YoutubeLiveDetectionService`/`PlatformTenantService.impersonateTenant`) to compute:
+**Moving:** `PATCH /network/churches/:id/parent` (`{ parentId }`, owners) moves a church and everything under it.
+- **Who can move what:** the moved church and its new parent must both be in the network, and the old and new parents must both be under the current church (or be it). So the top church can move anything, and a region only within its own branches.
+- **Refused:** the top church itself, a loop (moving under one of its own branches), and anything that would pass the level cap (new parent's depth plus the height of the moved subtree).
+- **Logging:** root table `network_moves`; audit `NETWORK_CHURCH_MOVED`. The address is untouched.
 
-| Field | Definition |
-|-------|------------|
-| `memberCount` | Count of `members` with `status = ACTIVE` |
-| `attendanceRate` | Same PRESENT/LATE/ATTENDED_ONLINE-over-a-window definition `AttendanceService.getMyAttendanceSummary` already uses per-member (ON_LEAVE excluded from both numerator and denominator), aggregated church-wide over the last 30 days instead. `null` when there are zero attendance rows in the window, not `0` |
-| `totalGiving` | Sum of `tithe_records.amount` |
+**Level names:** `PUT /network/levels` (`{ names }`, owners of the top church) stores `network_levels (network_root_id, depth, name)`. Index 0 names depth 2, and so on down. They are labels only. Where a level has no name, a church shows as "Region" if it has branches and "Branch" if not.
 
-The public `tenant_rollups` row is upserted *outside* the tenant-context block (same convention as
-`YoutubeLiveDetectionService`'s own public-row update) using the plain, non-tenant-scoped repository.
+**Reading:** `GET /network` (BRANCH_READ) returns `{ available, inNetwork, canAddBranch, reasonCannotAdd, isTop, me, ancestors, nodes, levels, maxLevels, recentMoves }`. `ancestors` is the chain up to the top; `nodes` is the current church and everything under it, never the rest of the network. Each node is `{ id, name, subdomain, label, parentId, depth, levelName, path, childCount, isActive }`, with `path` like "ABC · Lagos · Ikeja". `GET /network/address?label=` previews a new branch's address.
 
-**Parent-side overview (`GET /branch/overview`):** reads only `tenants WHERE parent_tenant_id = :self` joined
-against `tenant_rollups` — never reaches into a branch's schema or shard directly, no cross-tenant read path exists
-in this class at all to get wrong (§11.2).
+**Addresses for everyone else:** hyphens are kept for branch addresses. Sign-up, the sign-up live check (`GET /signup/subdomain-availability`) and console church creation accept only `^[a-z0-9]{1,63}$`. `checkSubdomain(sub, { allowHyphen: true })` is used only by the Network page. Existing hyphenated churches keep working as standalone.
 
-**Sharing consent (`tenants.share_data_with_parent`, `tenants.share_giving_with_parent`):** without this, a
-branch's rollup became visible to its parent the instant an invite was accepted, with no notice or opt-out.
-Self-service, settable only by the branch's own admin via `GET`/`PATCH /branch/sharing-consent` — never by the
-parent. Gates *visibility* at `getOverview()`, not *computation* — `computeAndUpsertOne` still computes and stores
-every branch's real numbers regardless (a branch's own `tenant_rollups` row is its own data, useful for its own
-future views too); consent only controls what's exposed to a specific parent. `shareDataWithParent` defaults `true`
-(being a branch structurally implies a reporting relationship — that's the point of the feature, and the admin who
-accepted the invite already knows a parent relationship is being formed) and gates every stat when `false` (all
-fields `null`, `sharingEnabled: false` in the response — the parent still sees the branch exists, since they
-invited it, just not its numbers). `shareGivingWithParent` defaults `false` **regardless of the main flag** — giving
-specifically stays opt-in even when general sharing is on, matching how sensitive individual church finances are
-treated everywhere else in this codebase (dedicated `TITHE_READ` permission, PII-scrubbing conventions).
+**Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
 
-**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
-one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
-(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
-locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
-(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
-relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
-make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched.
-
-**Linking an already-onboarded tenant as a branch (`TenantBranchLinkRequest`, `src/branch/service/branch-link-request.service.ts`):**
-the invite flow above only covers a church that doesn't have a tenant yet — it can't be reused for two churches that
-are *already* separate, fully-onboarded tenants, since there's no signup step left to attach a token to. This is a
-two-sided negotiation between two existing tenants instead: a would-be parent's admin sends a request naming the
-target's subdomain (`POST /branch/link-requests`), and nothing about either tenant changes until the **target's own
-admin**, from inside their own tenant context, explicitly accepts or declines it (`POST
-/branch/link-requests/:id/accept`/`/decline`) — the parent cannot accept on the target's behalf, mirroring the same
-"write intent first, mutate state only on confirmed action" discipline used everywhere else BYOK/checkout-shaped
-flows appear in this codebase. `TenantBranchLinkRequest` (`public` schema, `tenant_branch_link_requests`) is the
-sibling control-plane table to `tenant_branch_invites`, keyed on `targetTenantId` instead of an email+token pair
-since the target already exists to be looked up directly.
-
-Validation at creation time: target subdomain must resolve to a real tenant, a tenant can't link itself
-(`target.id === parentTenantId`), the target can't already have a parent, and only one `pending` request between a
-given parent/target pair may exist at a time. On accept, `target.parentTenantId` is set directly (no provisioning
-involved — the target tenant already exists) and, if `sponsorPlan` was requested and the parent currently has a paid
-plan, the target's *existing* `Subscription` row is switched onto the parent's plan
-(`planId`/`status: ACTIVE`/`cancelAtPeriodEnd: false`/`sponsoredByTenantId`) — same fallback as
-`BranchInviteService.resolveInvite` if the parent is on Free (silently skipped, not an error, since `sponsorPlan` was
-only ever a request). Both sides get a best-effort email notification (target on request creation, parent on
-accept/decline) via the same manually-entered tenant-context pattern `SubscriptionLapseScheduler.findAdminEmail`
-already uses (looks up the tenant's oldest active `Admin`, ordered by `createdAt`) — reused here through the shared
-`runInTenantContext` helper rather than duplicated inline, since the recipient's admin row lives in a schema this
-service has no ambient CLS context for.
-
-A parent can have any number of branches — `getOverview()`/`listOutgoing()` are both plain unbounded
-`WHERE parentTenantId = :self` queries, and nothing in this feature restricts branch count.
-
-`GET /branch/link-requests/outgoing`/`/incoming` return `BranchLinkRequestView`, not the raw entity — the entity
-only stores `parentTenantId`/`targetTenantId` UUIDs, so both list reads batch-fetch the referenced `Tenant` rows
-(one `IN` query per list call) and enrich each row with `parentTenantName`/`targetTenantName`/`targetTenantSubdomain`
-before returning, the same way `BranchInviteService`'s invites are already human-readable via the invite's own
-`email` column.
-
-**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
-one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
-(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
-locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
-(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
-relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
-make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched. This
-applies identically regardless of whether the branch was linked via invite or via a link request — `unlinkBranch`/
-`leaveParent` only look at `Tenant.parentTenantId`/`Subscription.sponsoredByTenantId`, not how the link was formed.
-
-**Routes** (`AdminGuard`, tenant-scoped):
-
-| Method | Path                              | Permission     | Description |
-|--------|-----------------------------------|----------------|--------------|
-| POST   | `/branch/invites`                 | BRANCH_WRITE   | Body `{ email, sponsorPlan? }` — creates a pending invite, emails the invite code. `sponsorPlan: true` means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan |
-| GET    | `/branch/invites`                 | BRANCH_READ    | This tenant's own sent invites |
-| DELETE | `/branch/invites/:id`             | BRANCH_WRITE   | Revokes a `pending` invite — `400` if it's already accepted/revoked |
-| GET    | `/branch/overview`                | BRANCH_READ    | This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent |
-| GET    | `/branch/sharing-consent`         | BRANCH_READ    | This tenant's own `{ shareDataWithParent, shareGivingWithParent, parentTenantId, parentTenantName }` — the latter two are null when this tenant isn't a branch of anything, and are the only way for the frontend to know whether "Leave Parent" is relevant to show at all |
-| PATCH  | `/branch/sharing-consent`         | BRANCH_WRITE   | Body is a partial of `{ shareDataWithParent, shareGivingWithParent }` — only provided fields are applied; `parentTenantId`/`parentTenantName` are read-only and always echoed back |
-| DELETE | `/branch/:branchTenantId`         | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
-| POST   | `/branch/leave`                   | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
-| POST   | `/branch/link-requests`           | BRANCH_WRITE   | Body `{ targetSubdomain, sponsorPlan? }` — sends a link request to an already-onboarded tenant. `404` if the subdomain doesn't resolve, `400` if self-link/target already has a parent/a pending request already exists |
-| GET    | `/branch/link-requests/outgoing`  | BRANCH_READ    | Link requests this tenant has sent, as a would-be parent |
-| DELETE | `/branch/link-requests/:id`       | BRANCH_WRITE   | Parent revokes its own `pending` request — `400` if no longer pending |
-| GET    | `/branch/link-requests/incoming`  | BRANCH_READ    | Link requests sent TO this tenant by a would-be parent |
-| POST   | `/branch/link-requests/:id/accept`| BRANCH_WRITE   | Target accepts — sets `parentTenantId`, applies sponsorship if requested and the parent is on a paid plan. `400` if not pending or this tenant already has a parent |
-| POST   | `/branch/link-requests/:id/decline`| BRANCH_WRITE  | Target declines — `400` if no longer pending |
-
-Branch hierarchy UI is built in `discuva-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
-unlink, link-request sending/incoming-review, and a "this church" section showing sharing consent toggles +
-leave-parent, only shown when `parentTenantId` is actually set (see `GET /branch/sharing-consent` above).
-Multi-level hierarchy (branch-of-a-branch) is representable with zero further schema change (`parent_tenant_id` is
-self-referencing) but only flat parent → branch is exercised by anything built so far.
+**Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 
 ### Forms (`src/forms/`)
 

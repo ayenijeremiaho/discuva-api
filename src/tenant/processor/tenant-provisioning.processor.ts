@@ -11,7 +11,6 @@ import {
   TenantProvisioningJobData,
   TenantProvisioningService,
 } from '../service/tenant-provisioning.service';
-import { BranchInviteService } from '../../branch/service/branch-invite.service';
 
 @Processor(TENANT_PROVISIONING_QUEUE)
 export class TenantProvisioningProcessor {
@@ -21,13 +20,11 @@ export class TenantProvisioningProcessor {
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
     private readonly provisioningService: TenantProvisioningService,
-    private readonly branchInviteService: BranchInviteService,
   ) {}
 
   @Process(TENANT_PROVISIONING_JOB)
   async handle(job: Job<TenantProvisioningJobData>): Promise<void> {
-    const { tenantId, branchInviteToken, actorType, actorId, ...params } =
-      job.data;
+    const { tenantId, actorType, actorId, ...params } = job.data;
 
     await this.tenantRepo.update(tenantId, {
       onboardingStatus: TenantOnboardingStatus.PROVISIONING,
@@ -54,10 +51,6 @@ export class TenantProvisioningProcessor {
       actorType,
       { actorId },
     );
-
-    if (branchInviteToken) {
-      await this.branchInviteService.markAccepted(branchInviteToken, tenant.id);
-    }
   }
 
   // Fires once per failed attempt, not only after retries are exhausted —

@@ -668,7 +668,6 @@ export class PlatformTenantService {
       planId?: string;
       parentTenantId?: string;
       sponsoredPlanId?: string;
-      branchInviteToken?: string;
     } | null;
     if (!pending) {
       throw new ConflictException(

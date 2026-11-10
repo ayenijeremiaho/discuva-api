@@ -24,7 +24,9 @@ export type TenantOnboardingEventType =
   | 'APPROVED'
   | 'PROVISIONING_STARTED'
   | 'PROVISIONING_COMPLETED'
-  | 'PROVISIONING_FAILED';
+  | 'PROVISIONING_FAILED'
+  // Created from a church's Network page as a branch under it.
+  | 'NETWORK_BRANCH_CREATED';
 
 // Control-plane table — lives in `public`, alongside `tenants` itself. A
 // platform-level audit trail for the onboarding lifecycle, distinct from

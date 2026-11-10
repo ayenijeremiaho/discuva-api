@@ -6,7 +6,6 @@ import {
   TenantProvisioningJobData,
   TenantProvisioningService,
 } from '../service/tenant-provisioning.service';
-import { BranchInviteService } from '../../branch/service/branch-invite.service';
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
@@ -16,7 +15,6 @@ const mockProvisioningService = {
   provision: jest.fn(),
   recordEvent: jest.fn(),
 };
-const mockBranchInviteService = { markAccepted: jest.fn() };
 
 const baseJobData: TenantProvisioningJobData = {
   tenantId: 'tenant-1',
@@ -57,7 +55,6 @@ describe('TenantProvisioningProcessor', () => {
           provide: TenantProvisioningService,
           useValue: mockProvisioningService,
         },
-        { provide: BranchInviteService, useValue: mockBranchInviteService },
       ],
     }).compile();
     processor = module.get(TenantProvisioningProcessor);
@@ -99,22 +96,7 @@ describe('TenantProvisioningProcessor', () => {
       );
     });
 
-    it('consumes the branch invite after success when a token was carried on the job', async () => {
-      await processor.handle(makeJob({ branchInviteToken: 'the-token' }));
-
-      expect(mockBranchInviteService.markAccepted).toHaveBeenCalledWith(
-        'the-token',
-        'tenant-1',
-      );
-    });
-
-    it('does not touch the branch invite service when no token is present', async () => {
-      await processor.handle(makeJob());
-
-      expect(mockBranchInviteService.markAccepted).not.toHaveBeenCalled();
-    });
-
-    it('does not swallow job data fields not part of ProvisionTenantParams (tenantId/actorType/branchInviteToken)', async () => {
+    it('does not swallow job data fields not part of ProvisionTenantParams (tenantId/actorType)', async () => {
       await processor.handle(
         makeJob({
           actorId: 'admin-1',
@@ -125,7 +107,6 @@ describe('TenantProvisioningProcessor', () => {
       const provisionArg = mockProvisioningService.provision.mock.calls[0][0];
       expect(provisionArg.tenantId).toBeUndefined();
       expect(provisionArg.actorType).toBeUndefined();
-      expect(provisionArg.branchInviteToken).toBeUndefined();
     });
   });
 

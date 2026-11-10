@@ -99,7 +99,8 @@ export class DiscuvaAccountService {
     );
   }
 
-  private async readModeOn(key: PlatformSettingKey): Promise<boolean> {
+  // A 0/1/2 platform switch: off, test churches only, everyone. Read for the church in context.
+  async readModeOn(key: PlatformSettingKey): Promise<boolean> {
     const mode = await this.platformSettings.getNumber(key);
     if (mode === AccountMode.ON) return true;
     if (mode !== AccountMode.TEST) return false;

@@ -147,6 +147,19 @@ export class Tenant extends BaseEntity {
   @Column({ nullable: true })
   parentTenantId: string | null;
 
+  // The top church of this church's network (itself for the top church); null outside a network.
+  @Column({ type: 'uuid', name: 'network_root_id', nullable: true })
+  networkRootId: string | null;
+
+  // Short name within the network ("Ikeja"), shown in its path; the top church uses its name.
+  @Column({
+    type: 'varchar',
+    length: 40,
+    name: 'network_label',
+    nullable: true,
+  })
+  networkLabel: string | null;
+
   // Self-service, settable only by this tenant's own admin — never the
   // parent. Gates BranchRollupService.getOverview()'s per-branch visibility,
   // not computation: a branch's own tenant_rollups row is always computed

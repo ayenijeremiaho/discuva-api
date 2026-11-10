@@ -36,7 +36,6 @@ import { TenantAssetService } from './service/tenant-asset.service';
 import { TenantProfileService } from './service/tenant-profile.service';
 import { TenantProvisioningProcessor } from './processor/tenant-provisioning.processor';
 import { FounderWelcomeEmailScheduler } from './scheduler/founder-welcome-email.scheduler';
-import { BranchModule } from '../branch/branch.module';
 
 /**
  * Wired live (§9 Phase 8's "fresh rollout" variant — no existing church's
@@ -130,7 +129,6 @@ import { BranchModule } from '../branch/branch.module';
     ]),
     BullModule.registerQueue({ name: TENANT_PROVISIONING_QUEUE }),
     BullModule.registerQueue({ name: ACCOUNT_FILE_CLEANUP_QUEUE }),
-    BranchModule,
     // Independent registration from AuthModule's own (same jwtConfig/
     // refreshJwtConfig factories, same secrets) — TenantMiddleware needs to
     // verify a JWT's tenant claim itself, before any guard runs, so it

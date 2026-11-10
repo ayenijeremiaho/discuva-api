@@ -31,8 +31,9 @@ export class SignupDto {
   // (www/api/admin/platform/app) are rejected in the service, not here,
   // since that list lives with the resolution logic it protects.
   @IsString()
-  @Matches(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
-    message: 'subdomain must be lowercase letters, numbers, and hyphens only',
+  @Matches(/^[a-z0-9]{1,63}$/, {
+    message:
+      'Use lowercase letters and numbers only. Hyphens are kept for branch addresses.',
   })
   subdomain: string;
 
@@ -119,15 +120,6 @@ export class SignupDto {
   @IsString()
   @MaxLength(500)
   note?: string;
-
-  // Present only when this signup is completing a branch invite
-  // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the
-  // invited church by BranchInviteService.createInvite. Omitted entirely
-  // for a normal, non-branch signup.
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  branchInviteToken?: string;
 }
 
 export class ConfirmSignupDto {

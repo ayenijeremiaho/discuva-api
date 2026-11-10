@@ -88,7 +88,6 @@ export interface TenantProvisioningJobData extends ProvisionTenantParams {
   actorId?: string;
   // Signup-path only — consumed by the processor (not the controller/
   // approveTenant) since neither of those await provisioning to completion.
-  branchInviteToken?: string;
 }
 
 // Shared by POST /signup and the provision:tenant CLI script — one
@@ -96,6 +95,9 @@ export interface TenantProvisioningJobData extends ProvisionTenantParams {
 // §4.8). Every step checks existing state before acting, so calling
 // provision() again for a tenant that crashed partway through resumes
 // rather than erroring or double-creating.
+export const STANDALONE_ADDRESS = /^[a-z0-9]{1,63}$/;
+const HYPHENATED_ADDRESS = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 @Injectable()
 export class TenantProvisioningService {
   private readonly logger = new Logger(TenantProvisioningService.name);
@@ -136,9 +138,7 @@ export class TenantProvisioningService {
   // way the non-gated flow keeps them).
   async holdForApproval(
     tenant: Tenant,
-    pendingParams: Omit<ProvisionTenantParams, 'subdomain' | 'churchName'> & {
-      branchInviteToken?: string;
-    },
+    pendingParams: Omit<ProvisionTenantParams, 'subdomain' | 'churchName'> & {},
   ): Promise<void> {
     await this.tenantRepo.update(tenant.id, {
       onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
@@ -200,12 +200,17 @@ export class TenantProvisioningService {
   }
 
   // For the sign-up form's live check. Submitting still applies the same rules.
-  async checkSubdomain(subdomain: string): Promise<{
+  // Hyphens are kept for branch addresses ("abc-ikeja"), which only the Network page creates.
+  async checkSubdomain(
+    subdomain: string,
+    { allowHyphen = false }: { allowHyphen?: boolean } = {},
+  ): Promise<{
     available: boolean;
     reason?: 'INVALID' | 'RESERVED' | 'TAKEN';
   }> {
     const normalized = subdomain.toLowerCase();
-    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) {
+    const shape = allowHyphen ? HYPHENATED_ADDRESS : STANDALONE_ADDRESS;
+    if (!shape.test(normalized)) {
       return { available: false, reason: 'INVALID' };
     }
     if (

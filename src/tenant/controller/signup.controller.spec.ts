@@ -7,7 +7,6 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { SignupController } from './signup.controller';
 import { TenantProvisioningService } from '../service/tenant-provisioning.service';
-import { BranchInviteService } from '../../branch/service/branch-invite.service';
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
@@ -20,10 +19,6 @@ const mockProvisioningService = {
   recordEvent: jest.fn(),
   enqueueProvisioning: jest.fn(),
   holdForApproval: jest.fn(),
-};
-const mockBranchInviteService = {
-  resolveInvite: jest.fn(),
-  markAccepted: jest.fn(),
 };
 const mockSettings = {
   getNumber: jest.fn().mockResolvedValue(12),
@@ -67,7 +62,6 @@ describe('SignupController', () => {
           provide: TenantProvisioningService,
           useValue: mockProvisioningService,
         },
-        { provide: BranchInviteService, useValue: mockBranchInviteService },
         { provide: ChurchRequestService, useValue: mockChurchRequests },
         { provide: PlatformSettingsService, useValue: mockSettings },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
@@ -80,11 +74,9 @@ describe('SignupController', () => {
     it('starts email confirmation for a normal signup, without provisioning', async () => {
       const result = await controller.signup(baseDto);
 
-      expect(mockBranchInviteService.resolveInvite).not.toHaveBeenCalled();
       expect(mockProvisioningService.ensurePendingTenant).toHaveBeenCalledWith(
         baseDto.subdomain,
         baseDto.churchName,
-        undefined,
       );
       expect(mockChurchRequests.submit).toHaveBeenCalledWith(
         pendingTenant,
@@ -95,49 +87,6 @@ describe('SignupController', () => {
       ).not.toHaveBeenCalled();
       expect(result.tenant.onboardingStatus).toBe(
         TenantOnboardingStatus.AWAITING_CONFIRMATION,
-      );
-    });
-
-    it('resolves the invite token and enqueues provisioning with parentTenantId + the invite token', async () => {
-      mockBranchInviteService.resolveInvite.mockResolvedValue({
-        parentTenantId: 'parent-tenant-1',
-        sponsoredPlanId: null,
-      });
-
-      await controller.signup({ ...baseDto, branchInviteToken: 'the-token' });
-
-      expect(mockBranchInviteService.resolveInvite).toHaveBeenCalledWith(
-        'the-token',
-      );
-      expect(mockProvisioningService.ensurePendingTenant).toHaveBeenCalledWith(
-        baseDto.subdomain,
-        baseDto.churchName,
-        'parent-tenant-1',
-      );
-      expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalledWith(
-        expect.objectContaining({
-          parentTenantId: 'parent-tenant-1',
-          branchInviteToken: 'the-token',
-        }),
-      );
-      // Consumption moves to TenantProvisioningProcessor, once provisioning
-      // actually succeeds — the controller no longer awaits that.
-      expect(mockBranchInviteService.markAccepted).not.toHaveBeenCalled();
-    });
-
-    it('passes sponsoredPlanId through to the enqueued job when the invite is sponsored', async () => {
-      mockBranchInviteService.resolveInvite.mockResolvedValue({
-        parentTenantId: 'parent-tenant-1',
-        sponsoredPlanId: 'pro',
-      });
-
-      await controller.signup({ ...baseDto, branchInviteToken: 'the-token' });
-
-      expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalledWith(
-        expect.objectContaining({
-          parentTenantId: 'parent-tenant-1',
-          sponsoredPlanId: 'pro',
-        }),
       );
     });
 
@@ -152,34 +101,6 @@ describe('SignupController', () => {
       expect(
         mockProvisioningService.enqueueProvisioning,
       ).not.toHaveBeenCalled();
-    });
-
-    it('propagates an invalid/expired invite token as a signup failure before creating a tenant row', async () => {
-      mockBranchInviteService.resolveInvite.mockRejectedValue(
-        new Error('Invalid or already-used invite code.'),
-      );
-
-      await expect(
-        controller.signup({ ...baseDto, branchInviteToken: 'bad-token' }),
-      ).rejects.toThrow('Invalid or already-used invite code.');
-      expect(
-        mockProvisioningService.ensurePendingTenant,
-      ).not.toHaveBeenCalled();
-      expect(
-        mockProvisioningService.enqueueProvisioning,
-      ).not.toHaveBeenCalled();
-    });
-
-    it('sends a branch invite straight to provisioning, as a parent church vetted it', async () => {
-      mockBranchInviteService.resolveInvite.mockResolvedValue({
-        parentTenantId: 'parent-tenant-1',
-        sponsoredPlanId: null,
-      });
-
-      await controller.signup({ ...baseDto, branchInviteToken: 'the-token' });
-
-      expect(mockChurchRequests.submit).not.toHaveBeenCalled();
-      expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalled();
     });
   });
 

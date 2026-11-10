@@ -475,6 +475,17 @@ describe('TenantProvisioningService', () => {
       });
     });
 
+    it('keeps hyphens for branch addresses, which only the Network page asks for', async () => {
+      mockTenantRepo.findOne.mockResolvedValue(null);
+      await expect(service.checkSubdomain('grace-ikeja')).resolves.toEqual({
+        available: false,
+        reason: 'INVALID',
+      });
+      await expect(
+        service.checkSubdomain('grace-ikeja', { allowHyphen: true }),
+      ).resolves.toEqual({ available: true });
+    });
+
     it('reports a free address as available', async () => {
       mockTenantRepo.findOne.mockResolvedValue(null);
       await expect(service.checkSubdomain('grace')).resolves.toEqual({

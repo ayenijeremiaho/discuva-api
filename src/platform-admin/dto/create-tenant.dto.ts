@@ -26,8 +26,9 @@ export class CreateTenantDto {
   // rule, kept duplicated rather than shared since these two DTOs no
   // longer share a base class).
   @IsString()
-  @Matches(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
-    message: 'subdomain must be lowercase letters, numbers, and hyphens only',
+  @Matches(/^[a-z0-9]{1,63}$/, {
+    message:
+      'Use lowercase letters and numbers only. Hyphens are kept for branch addresses.',
   })
   subdomain: string;
 

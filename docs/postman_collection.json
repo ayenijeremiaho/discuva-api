@@ -42117,108 +42117,8 @@
       ]
     },
     {
-      "name": "Branch (Admin)",
+      "name": "Church Network (Admin)",
       "item": [
-        {
-          "name": "Create Branch Invite",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/branch/invites",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "invites"
-              ]
-            },
-            "description": "BRANCH_WRITE. Invites a church that does not have a Discuva tenant yet to join as a branch — generates a 64-char opaque token, emails it, records a pending invite. sponsorPlan: true means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@newbranch.org\",\n  \"sponsorPlan\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"parentTenantId\": \"uuid\",\n  \"email\": \"admin@newbranch.org\",\n  \"token\": \"64-char-hex\",\n  \"status\": \"pending\",\n  \"expiresAt\": \"2026-08-15T00:00:00.000Z\",\n  \"acceptedTenantId\": null,\n  \"sponsorPlan\": false,\n  \"createdAt\": \"2026-08-08T00:00:00.000Z\",\n  \"updatedAt\": \"2026-08-08T00:00:00.000Z\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "List Sent Invites",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/invites",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "invites"
-              ]
-            },
-            "description": "BRANCH_READ. This tenant's own sent invites, newest first."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"parentTenantId\": \"uuid\",\n    \"email\": \"admin@newbranch.org\",\n    \"token\": \"64-char-hex\",\n    \"status\": \"pending\",\n    \"expiresAt\": \"2026-08-15T00:00:00.000Z\",\n    \"acceptedTenantId\": null,\n    \"sponsorPlan\": false,\n    \"createdAt\": \"2026-08-08T00:00:00.000Z\"\n  }\n]"
-            }
-          ]
-        },
-        {
-          "name": "Revoke Invite",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/invites/:id",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "invites",
-                ":id"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "",
-                  "description": ""
-                }
-              ]
-            },
-            "description": "BRANCH_WRITE. Revokes a pending invite. 400 if it's already accepted/revoked."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"status\": \"revoked\"\n}"
-            }
-          ]
-        },
         {
           "name": "Get Branches Overview",
           "request": {
@@ -42246,33 +42146,26 @@
           ]
         },
         {
-          "name": "Get Sharing Consent",
+          "name": "Get Giving Sharing",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/branch/sharing-consent",
+              "raw": "{{baseUrl}}/branch/giving-sharing",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "branch",
-                "sharing-consent"
+                "giving-sharing"
               ]
             },
-            "description": "BRANCH_READ. This tenant's own sharing preferences as a branch. parentTenantId/parentTenantName are null when this tenant isn't a branch of anything."
+            "description": "BRANCH_READ. Whether this church shares its giving totals with the churches above it. Other figures are always shared."
           },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"shareDataWithParent\": true,\n  \"shareGivingWithParent\": false,\n  \"parentTenantId\": \"uuid\",\n  \"parentTenantName\": \"Parent Church\"\n}"
-            }
-          ]
+          "response": []
         },
         {
-          "name": "Update Sharing Consent",
+          "name": "Set Giving Sharing",
           "request": {
             "method": "PATCH",
             "header": [
@@ -42282,16 +42175,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/branch/sharing-consent",
+              "raw": "{{baseUrl}}/branch/giving-sharing",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "branch",
-                "sharing-consent"
+                "giving-sharing"
               ]
             },
-            "description": "BRANCH_WRITE. Partial update of { shareDataWithParent, shareGivingWithParent } — only provided fields are applied. Self-service, never settable by the parent.",
+            "description": "BRANCH_WRITE. This church's own choice; the churches above can't change it.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"shareGivingWithParent\": true\n}",
@@ -42302,60 +42195,53 @@
               }
             }
           },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"shareDataWithParent\": true,\n  \"shareGivingWithParent\": true,\n  \"parentTenantId\": \"uuid\",\n  \"parentTenantName\": \"Parent Church\"\n}"
-            }
-          ]
+          "response": []
         },
         {
-          "name": "Unlink Branch",
+          "name": "Network View",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/branch/:branchTenantId",
+              "raw": "{{baseUrl}}/network",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "branch",
-                ":branchTenantId"
+                "network"
+              ]
+            },
+            "description": "BRANCH_READ. Whether networks are on, whether this church can add a branch (and why not), its chain to the top, itself and everything under it, level names and recent moves. Never shows churches elsewhere in the network."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Branch Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/address?label=Lagos Island",
+              "host": [
+                "{{baseUrl}}"
               ],
-              "variable": [
+              "path": [
+                "network",
+                "address"
+              ],
+              "query": [
                 {
-                  "key": "branchTenantId",
-                  "value": "",
-                  "description": ""
+                  "key": "label",
+                  "value": "Lagos Island"
                 }
               ]
             },
-            "description": "BRANCH_WRITE. Parent detaches one of its own branches. 404 if not linked to this tenant. Reverts a sponsored plan on the branch back to Free if it was sponsored by this tenant."
-          }
+            "description": "BRANCH_WRITE. The address a new branch with this label would get: the network's address plus the label."
+          },
+          "response": []
         },
         {
-          "name": "Leave Parent",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/leave",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "leave"
-              ]
-            },
-            "description": "BRANCH_WRITE. This tenant leaves its own parent. 400 if it has none. Reverts a sponsored plan back to Free if it was sponsored by the parent being left."
-          }
-        },
-        {
-          "name": "Send Branch Link Request",
+          "name": "Add Branch",
           "request": {
             "method": "POST",
             "header": [
@@ -42365,19 +42251,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/branch/link-requests",
+              "raw": "{{baseUrl}}/network/branches",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "branch",
-                "link-requests"
+                "network",
+                "branches"
               ]
             },
-            "description": "BRANCH_WRITE. Requests to link an already-onboarded, standalone tenant as a branch by subdomain — for a church that already has its own Discuva account (the invite flow above only covers a church that doesn't have a tenant yet). Nothing changes until the target's own admin accepts. 404 if the subdomain doesn't resolve; 400 if self-link, the target already has a parent, or a pending request to this target already exists.",
+            "description": "BRANCH_WRITE, owners only. Adds a branch under the current church. A verified church's first branch starts the network. The branch is created at once; its owner is emailed a link to set a password. Refused past the level cap (platform setting, default 5).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"targetSubdomain\": \"theirchurch\",\n  \"sponsorPlan\": false\n}",
+              "raw": "{\n  \"name\": \"ABC Ikeja\",\n  \"label\": \"Ikeja\",\n  \"ownerFirstname\": \"Ada\",\n  \"ownerLastname\": \"Obi\",\n  \"ownerEmail\": \"delivered+ikeja@resend.dev\",\n  \"sponsor\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -42385,172 +42271,75 @@
               }
             }
           },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"parentTenantId\": \"uuid\",\n  \"targetTenantId\": \"uuid\",\n  \"status\": \"pending\",\n  \"sponsorPlan\": false,\n  \"respondedAt\": null,\n  \"createdAt\": \"2026-08-08T00:00:00.000Z\",\n  \"updatedAt\": \"2026-08-08T00:00:00.000Z\"\n}"
-            }
-          ]
+          "response": []
         },
         {
-          "name": "List Outgoing Link Requests",
+          "name": "Move Church",
           "request": {
-            "method": "GET",
-            "header": [],
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/branch/link-requests/outgoing",
+              "raw": "{{baseUrl}}/network/churches/{{networkChurchId}}/parent",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "branch",
-                "link-requests",
-                "outgoing"
+                "network",
+                "churches",
+                "{{networkChurchId}}",
+                "parent"
               ]
             },
-            "description": "BRANCH_READ. Link requests this tenant has sent, as a would-be parent. Enriched with the target's name/subdomain (the entity itself only stores tenant IDs)."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"parentTenantId\": \"uuid\",\n    \"parentTenantName\": \"This Church\",\n    \"targetTenantId\": \"uuid\",\n    \"targetTenantName\": \"Their Church\",\n    \"targetTenantSubdomain\": \"theirchurch\",\n    \"status\": \"pending\",\n    \"sponsorPlan\": false,\n    \"respondedAt\": null,\n    \"createdAt\": \"2026-08-08T00:00:00.000Z\"\n  }\n]"
-            }
-          ]
-        },
-        {
-          "name": "Revoke Link Request",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/link-requests/:id",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "link-requests",
-                ":id"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "",
-                  "description": ""
+            "description": "BRANCH_WRITE, owners only. Moves a church and everything under it under another church in the network. Both places must be under the current church. Refuses the top church, loops and going past the level cap. The address never changes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parentId\": \"{{networkParentId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
                 }
-              ]
-            },
-            "description": "BRANCH_WRITE. Parent revokes its own pending request. 400 if no longer pending."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"status\": \"revoked\"\n}"
+              }
             }
-          ]
+          },
+          "response": []
         },
         {
-          "name": "List Incoming Link Requests",
+          "name": "Name Levels",
           "request": {
-            "method": "GET",
-            "header": [],
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/branch/link-requests/incoming",
+              "raw": "{{baseUrl}}/network/levels",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "branch",
-                "link-requests",
-                "incoming"
+                "network",
+                "levels"
               ]
             },
-            "description": "BRANCH_READ. Link requests sent TO this tenant by a would-be parent. Enriched with the parent's name (the entity itself only stores tenant IDs)."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"parentTenantId\": \"uuid\",\n    \"parentTenantName\": \"Would-Be Parent Church\",\n    \"targetTenantId\": \"uuid\",\n    \"targetTenantName\": \"This Church\",\n    \"targetTenantSubdomain\": \"thischurch\",\n    \"status\": \"pending\",\n    \"sponsorPlan\": true,\n    \"respondedAt\": null,\n    \"createdAt\": \"2026-08-08T00:00:00.000Z\"\n  }\n]"
-            }
-          ]
-        },
-        {
-          "name": "Accept Link Request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/link-requests/:id/accept",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "link-requests",
-                ":id",
-                "accept"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "",
-                  "description": ""
+            "description": "BRANCH_WRITE, owners of the top church. Names for the levels below the top church, in order; blank leaves a level unnamed (it then shows Region or Branch).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"names\": [\n    \"Zone\",\n    \"Area\",\n    \"Parish\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
                 }
-              ]
-            },
-            "description": "BRANCH_WRITE. Target-side only — the parent cannot accept on the target's behalf. Sets this tenant's parentTenantId. If the request's sponsorPlan was true and the parent currently has a paid plan, this tenant's existing subscription is switched onto the parent's plan (sponsoredByTenantId set); silently skipped, not an error, if the parent is on Free. 400 if the request is no longer pending or this tenant already has a parent."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"status\": \"accepted\"\n}"
+              }
             }
-          ]
-        },
-        {
-          "name": "Decline Link Request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/link-requests/:id/decline",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "link-requests",
-                ":id",
-                "decline"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "",
-                  "description": ""
-                }
-              ]
-            },
-            "description": "BRANCH_WRITE. Target-side only. 400 if the request is no longer pending."
           },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"uuid\",\n  \"status\": \"declined\"\n}"
-            }
-          ]
+          "response": []
         }
       ]
     },
