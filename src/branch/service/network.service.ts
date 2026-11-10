@@ -25,6 +25,7 @@ import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-k
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { NetworkLevel } from '../entity/network-level.entity';
 import { NetworkMove } from '../entity/network-move.entity';
+import { TenantRollup } from '../entity/tenant-rollup.entity';
 import { AddBranchDto } from '../dto/network.dto';
 
 const MAX_ADDRESS_TRIES = 20;
@@ -104,6 +105,8 @@ export class NetworkService {
     private readonly moveRepo: Repository<NetworkMove>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(TenantRollup)
+    private readonly rollupRepo: Repository<TenantRollup>,
     private readonly provisioning: TenantProvisioningService,
     private readonly accounts: DiscuvaAccountService,
     private readonly settings: PlatformSettingsService,
@@ -357,6 +360,75 @@ export class NetworkService {
       .filter((r) => r.name);
     if (rows.length) await this.levelRepo.save(rows);
     return this.levelList(await this.levelNames(current.id), maxLevels);
+  }
+
+  // Console: every network, with its size and depth. Structure and figures only, never anyone's details.
+  async platformNetworks(): Promise<
+    {
+      rootId: string;
+      name: string;
+      subdomain: string;
+      churches: number;
+      levels: number;
+    }[]
+  > {
+    const roots = await this.tenantRepo
+      .createQueryBuilder('t')
+      .select(['t.id', 't.name', 't.subdomain'])
+      .where('t.network_root_id = t.id')
+      .orderBy('t.name', 'ASC')
+      .getMany();
+    if (!roots.length) return [];
+    const trees = await Promise.all(roots.map((r) => this.loadTree(r.id)));
+    return roots.map((r, i) => ({
+      rootId: r.id,
+      name: r.name,
+      subdomain: r.subdomain,
+      churches: trees[i].byId.size,
+      levels: this.heightOf(trees[i], r.id),
+    }));
+  }
+
+  async platformNetwork(rootId: string): Promise<{
+    nodes: (NetworkNode & { memberCount: number | null })[];
+    levels: string[];
+    moves: NetworkView['recentMoves'];
+  }> {
+    const [tree, levels, maxLevels] = await Promise.all([
+      this.loadTree(rootId),
+      this.levelNames(rootId),
+      this.maxLevels(),
+    ]);
+    if (!tree.byId.has(rootId))
+      throw new NotFoundException('Network not found');
+    const ids = this.subtreeIds(tree, rootId);
+    const [rollups, moves] = await Promise.all([
+      this.rollupRepo.find({
+        where: { tenantId: In(ids) },
+        select: { tenantId: true, memberCount: true },
+      }),
+      this.moveRepo.find({
+        where: { networkRootId: rootId },
+        order: { createdAt: 'DESC' },
+        take: 20,
+      }),
+    ]);
+    const members = new Map(rollups.map((r) => [r.tenantId, r.memberCount]));
+    const path = (id: string | null) =>
+      id && tree.byId.has(id) ? this.toNode(tree, id, levels).path : null;
+    return {
+      nodes: ids.map((id) => ({
+        ...this.toNode(tree, id, levels),
+        memberCount: members.get(id) ?? null,
+      })),
+      levels: this.levelList(levels, maxLevels),
+      moves: moves.map((m) => ({
+        church: path(m.tenantId) ?? '',
+        from: path(m.fromParentId),
+        to: path(m.toParentId),
+        at: m.createdAt,
+      })),
+    };
   }
 
   private cannotStart(tenant: Tenant, admin: Admin): string | null {

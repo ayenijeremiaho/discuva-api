@@ -95,6 +95,11 @@ describe('NetworkService', () => {
     create: jest.fn((v) => v),
     save: jest.fn(),
   };
+  const rollupRepo = {
+    find: jest
+      .fn()
+      .mockResolvedValue([{ tenantId: 'lagos', memberCount: 120 }]),
+  };
   const subscriptionRepo = {
     findOne: jest.fn().mockResolvedValue({ planId: 'pro' }),
   };
@@ -130,6 +135,7 @@ describe('NetworkService', () => {
     levelRepo as never,
     moveRepo as never,
     subscriptionRepo as never,
+    rollupRepo as never,
     provisioning as never,
     accounts as never,
     settings as never,
@@ -298,6 +304,20 @@ describe('NetworkService', () => {
         service.moveChurch(owner, 'ikeja', 'abuja', 'm'),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
+  });
+
+  it('shows the console the whole tree with member counts, from any network', async () => {
+    const detail = await service.platformNetwork('abc');
+    expect(detail.nodes.map((n) => n.path)).toEqual([
+      'ABC',
+      'ABC · Abuja',
+      'ABC · Lagos',
+      'ABC · Lagos · Ikeja',
+    ]);
+    expect(detail.nodes.find((n) => n.id === 'lagos')?.memberCount).toBe(120);
+    await expect(service.platformNetwork('nope')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('lets only owners of the top church name the levels', async () => {

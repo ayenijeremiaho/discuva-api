@@ -2664,6 +2664,8 @@ A network is a **tree of churches** under one top church. Each church is still i
 
 **Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
 
+**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
+
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 
 ### Forms (`src/forms/`)
@@ -17003,6 +17005,8 @@ A network is a **tree of churches** under one top church. Each church is still i
 **Addresses for everyone else:** hyphens are kept for branch addresses. Sign-up, the sign-up live check (`GET /signup/subdomain-availability`) and console church creation accept only `^[a-z0-9]{1,63}$`. `checkSubdomain(sub, { allowHyphen: true })` is used only by the Network page. Existing hyphenated churches keep working as standalone.
 
 **Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
+
+**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
 
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 

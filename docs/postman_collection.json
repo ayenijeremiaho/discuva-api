@@ -44522,6 +44522,45 @@
               "type": "noauth"
             }
           }
+        },
+        {
+          "name": "List Church Networks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/networks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "networks"
+              ]
+            },
+            "description": "Platform admin (tenants:read). Every network: top church, number of churches, levels used."
+          },
+          "response": []
+        },
+        {
+          "name": "Church Network Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/networks/{{networkRootId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "networks",
+                "{{networkRootId}}"
+              ]
+            },
+            "description": "Platform admin (tenants:read). The whole tree with paths, level names and member counts, plus the last 20 moves. No members' details."
+          },
+          "response": []
         }
       ]
     },
