@@ -441,7 +441,7 @@ export class ServiceProgrammeService {
       .leftJoinAndSelect('slots.department', 'department')
       .leftJoinAndSelect('slots.backupDepartment', 'backupDepartment')
       .where(
-        `programme.publishedAt IS NOT NULL AND (programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now)))`,
+        `programme.publishedAt IS NOT NULL AND (programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now))`,
         {
           live: ServiceProgrammeStatusEnum.LIVE,
           draft: ServiceProgrammeStatusEnum.DRAFT,
