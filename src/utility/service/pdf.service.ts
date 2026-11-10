@@ -401,12 +401,11 @@ export class PdfService {
       doc.addPage();
       y = 20;
     }
-    const lines = doc.splitTextToSize(text, CONTENT_W);
-    doc
+    const lines = doc
       .setFont('helvetica', 'normal')
       .setFontSize(9)
-      .setTextColor(MUTED)
-      .text(lines, MARGIN, y);
+      .splitTextToSize(text, CONTENT_W);
+    doc.setTextColor(MUTED).text(lines, MARGIN, y);
     return y + lines.length * 4.5;
   }
 
@@ -2265,11 +2264,7 @@ export class PdfService {
     );
 
     const t = r.totals;
-    const change = r.recap.firstTimers
-      ? Math.round(
-          ((t.firstTimers - r.recap.firstTimers) / r.recap.firstTimers) * 100,
-        )
-      : null;
+    const change = r.change;
     y = this.drawStatCards(doc, y, theme, [
       {
         value: String(t.firstTimers),
@@ -2283,12 +2278,16 @@ export class PdfService {
       {
         value: String(t.wantsToJoinChurch),
         label: applyWording('Want to join the church', branding.wording),
-        note: `${pctOf(t.wantsToJoinChurch, t.firstTimers)} of first-timers`,
+        note: t.firstTimers
+          ? `${pctOf(t.wantsToJoinChurch, t.firstTimers)} of first-timers`
+          : undefined,
       },
       {
         value: String(t.wantsToJoinWorkforce),
         label: 'Want to join the workforce',
-        note: `${pctOf(t.wantsToJoinWorkforce, t.firstTimers)} of first-timers`,
+        note: t.firstTimers
+          ? `${pctOf(t.wantsToJoinWorkforce, t.firstTimers)} of first-timers`
+          : undefined,
       },
       r.strongestDay
         ? {
@@ -2299,6 +2298,12 @@ export class PdfService {
         : { value: '—', label: 'Busiest day' },
     ]);
 
+    if (!t.firstTimers)
+      y = this.drawAccountNote(
+        doc,
+        y + 8,
+        `No first-timers were recorded for ${monthName(r.month)}. If cards are still being typed in, set each one's date of visit so it counts in the right month.`,
+      );
     y = this.drawHighlightBoxes(doc, y + 6, r.highlights);
 
     const recap = r.recap;
@@ -2358,7 +2363,7 @@ export class PdfService {
       ]);
     }
 
-    if (r.byDate.length) {
+    if (r.byDate.length > 1) {
       y = this.sectionStart(doc, y + 10, 'First-timers by day', 8);
       y = this.drawDayChart(
         doc,
@@ -2433,11 +2438,21 @@ export class PdfService {
     }
 
     if (r.liked.length) {
-      y = this.sectionStart(doc, y + 10, 'What they liked', 2);
+      y = this.sectionStart(
+        doc,
+        y + 10,
+        'What they liked',
+        Math.min(2, Math.ceil(r.liked.length / 2)),
+      );
       y = this.drawQuoteCards(doc, y + 1, r.liked, theme.accent);
     }
     for (const f of r.fields.filter((f) => f.quotes?.length)) {
-      y = this.sectionStart(doc, y + 10, f.label, 2);
+      y = this.sectionStart(
+        doc,
+        y + 10,
+        f.label,
+        Math.min(2, Math.ceil(f.quotes!.length / 2)),
+      );
       y = this.drawQuoteCards(
         doc,
         y + 1,
@@ -2521,7 +2536,7 @@ export class PdfService {
     theme: ChurchThemeColors,
     cards: { value: string; label: string; note?: string; tone?: StatTone }[],
   ): number {
-    const perRow = Math.min(4, Math.max(cards.length, 1));
+    const perRow = 4;
     const gap = 4;
     const w = (CONTENT_W - gap * (perRow - 1)) / perRow;
     const h = 27;

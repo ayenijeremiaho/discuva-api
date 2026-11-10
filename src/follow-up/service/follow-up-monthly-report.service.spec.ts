@@ -139,6 +139,7 @@ describe('FollowUpMonthlyReportService', () => {
       { date: '2026-10-11', count: 1 },
     ]);
     expect(r.strongestDay).toEqual({ date: '2026-10-04', count: 3 });
+    expect(r.change).toBeNull();
     expect(r.services[0]).toEqual({
       date: '2026-10-04',
       eventName: 'First Service',
@@ -251,9 +252,35 @@ describe('FollowUpMonthlyReportService', () => {
             "29 of last month's first-timers couldn't be reached (41%)",
           ),
           "2 people from last month still haven't been followed up.",
-          "1 suggestion on what to do better. They're at the end of this report.",
+          "1 suggestion on what to do better. It's at the end of this report.",
         ]),
       );
+    });
+
+    it("doesn't turn a handful of people into percentages", () => {
+      const { good, watch } = highlightsOf({
+        ...(base as object),
+        totals: {
+          firstTimers: 6,
+          wantsToJoinChurch: 3,
+          wantsToJoinWorkforce: 1,
+        },
+        fields: [],
+        recap: {
+          month: '2026-09',
+          firstTimers: 3,
+          wantedToJoin: 2,
+          outcomes: [
+            { outcome: 'STILL_ATTENDING', label: 'Still attending', count: 1 },
+          ],
+          unreachable: 1,
+          notYetReached: 1,
+        },
+      } as never);
+      expect(good).toEqual([]);
+      expect(watch).toEqual([
+        "1 person from last month still hasn't been followed up.",
+      ]);
     });
 
     it('says nothing about a month with too little to go on', () => {

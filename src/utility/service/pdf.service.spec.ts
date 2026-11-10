@@ -500,6 +500,7 @@ describe('PdfService', () => {
             quotes: [{ name: 'Lydia', text: 'Softer lighting' }],
           },
         ],
+        change: -38,
         highlights: {
           good: ['48% of first-timers want to join.'],
           watch: ["29 of last month's first-timers couldn't be reached."],
@@ -523,6 +524,7 @@ describe('PdfService', () => {
       for (const expected of [
         'Follow-Up Monthly Report',
         'October 2026',
+        '-38% on September',
         'Going well',
         '48% of first-timers want to join.',
         'Needs attention',

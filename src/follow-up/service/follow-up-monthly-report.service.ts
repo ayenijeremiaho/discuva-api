@@ -12,6 +12,7 @@ import {
   FollowUpTaskTypeEnum,
 } from '../enums/follow-up.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { MIN_FOR_PERCENT } from '../follow-up-report.constants';
 
 const REPORT_CACHE_TTL = 300;
 // Quotes are read aloud at meetings; past this many a month the list stops being useful.
@@ -71,6 +72,8 @@ export interface FollowUpMonthlyReport {
   bySource: { source: string; label: string; count: number }[];
   liked: Quote[];
   fields: ReportField[];
+  // % change in first-timers on last month; null when either month is too small for it to mean anything.
+  change: number | null;
   // Plain sentences for the top of the report: what went well, and what the team should look at.
   highlights: { good: string[]; watch: string[] };
   recap: {
@@ -121,13 +124,16 @@ const plural = (n: number, one: string, many = `${one}s`) =>
 
 // Thresholds are deliberately simple; they point the team at what to discuss, not grade it.
 export function highlightsOf(
-  r: Omit<FollowUpMonthlyReport, 'highlights'>,
+  r: Omit<FollowUpMonthlyReport, 'highlights' | 'change'>,
 ): FollowUpMonthlyReport['highlights'] {
   const good: string[] = [];
   const watch: string[] = [];
   const { totals, recap } = r;
 
-  if (recap.firstTimers > 0 && totals.firstTimers > 0) {
+  if (
+    recap.firstTimers >= MIN_FOR_PERCENT &&
+    totals.firstTimers >= MIN_FOR_PERCENT
+  ) {
     const change = pct(
       totals.firstTimers - recap.firstTimers,
       recap.firstTimers,
@@ -140,26 +146,21 @@ export function highlightsOf(
       );
   }
 
-  if (totals.firstTimers >= 5) {
+  if (totals.firstTimers >= MIN_FOR_PERCENT) {
     const joining = pct(totals.wantsToJoinChurch, totals.firstTimers);
     if (joining >= 40) good.push(`${joining}% of first-timers want to join.`);
     else if (joining < 20)
       watch.push(`Only ${joining}% of first-timers said they want to join.`);
   }
 
-  if (r.strongestDay && r.byDate.length > 1)
-    good.push(
-      `The busiest day brought ${plural(r.strongestDay.count, 'first-timer')}.`,
-    );
-
   const heard = r.fields.find((f) => f.key === 'heard_from');
-  const top = heard?.counts?.find((c) => c.count > 0 && c.option !== 'Other');
+  const top = heard?.counts?.find((c) => c.count >= 3 && c.option !== 'Other');
   if (top)
     good.push(
       `"${top.option}" is how most first-timers heard about you (${top.count}).`,
     );
 
-  if (recap.wantedToJoin > 0) {
+  if (recap.wantedToJoin >= MIN_FOR_PERCENT) {
     const stayed = recap.outcomes
       .filter(
         (o) =>
@@ -168,28 +169,23 @@ export function highlightsOf(
       )
       .reduce((sum, o) => sum + o.count, 0);
     const stayedPct = pct(stayed, recap.wantedToJoin);
-    if (stayedPct >= 50)
-      good.push(
-        `${stayed} of last month's ${recap.wantedToJoin} who wanted to join are still with you (${stayedPct}%).`,
-      );
-    else if (stayed > 0)
-      watch.push(
-        `${stayed} of last month's ${recap.wantedToJoin} who wanted to join are still attending (${stayedPct}%).`,
-      );
+    const still = `${stayed} of last month's ${recap.wantedToJoin} who wanted to join ${stayed === 1 ? 'is' : 'are'} still`;
+    if (stayedPct >= 50) good.push(`${still} with you (${stayedPct}%).`);
+    else if (stayed > 0) watch.push(`${still} attending (${stayedPct}%).`);
     if (pct(recap.unreachable, recap.wantedToJoin) >= 20)
       watch.push(
         `${recap.unreachable} of last month's first-timers couldn't be reached (${pct(recap.unreachable, recap.wantedToJoin)}%). Check that phone numbers are taken down clearly.`,
       );
-    if (recap.notYetReached > 0)
-      watch.push(
-        `${plural(recap.notYetReached, 'person', 'people')} from last month still haven't been followed up.`,
-      );
   }
+  if (recap.notYetReached > 0)
+    watch.push(
+      `${plural(recap.notYetReached, 'person', 'people')} from last month still ${recap.notYetReached === 1 ? "hasn't" : "haven't"} been followed up.`,
+    );
 
   const better = r.fields.find((f) => f.key === 'improve')?.quotes?.length ?? 0;
   if (better)
     watch.push(
-      `${plural(better, 'suggestion')} on what to do better. They're at the end of this report.`,
+      `${plural(better, 'suggestion')} on what to do better. ${better === 1 ? "It's" : "They're"} at the end of this report.`,
     );
 
   return { good, watch };
@@ -286,7 +282,7 @@ export class FollowUpMonthlyReportService {
       null,
     );
 
-    const report: Omit<FollowUpMonthlyReport, 'highlights'> = {
+    const report: Omit<FollowUpMonthlyReport, 'highlights' | 'change'> = {
       month,
       from,
       to,
@@ -315,7 +311,15 @@ export class FollowUpMonthlyReportService {
         .filter((f) => f.answered > 0),
       recap: this.recap(recapMonth, recapRows),
     };
-    return { ...report, highlights: highlightsOf(report) };
+    const change =
+      report.recap.firstTimers >= MIN_FOR_PERCENT &&
+      report.totals.firstTimers >= MIN_FOR_PERCENT
+        ? pct(
+            report.totals.firstTimers - report.recap.firstTimers,
+            report.recap.firstTimers,
+          )
+        : null;
+    return { ...report, change, highlights: highlightsOf(report) };
   }
 
   private summarise(
