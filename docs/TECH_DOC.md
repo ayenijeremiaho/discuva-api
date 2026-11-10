@@ -1778,7 +1778,8 @@ need to publish an `ALL`-audience announcement without going through the admin-a
 `Admin`/SMS-permission check, `author` is left `null` (the FK is nullable for exactly this reason), `publishedAt` is
 now, and the same persist + push-notify path runs. Live announcements (Sermons' "Announce Live", YouTube, Facebook
 and Instagram detection) reach it through `LiveAnnouncementService` (see Live Announcements); the membership
-anniversary greeting calls it directly.
+anniversary greeting calls it directly. An optional fourth argument, `expiresAt`, ends the post (the anniversary greeting
+passes `DateService.endOfDay()`); live posts leave it `null`.
 
 **Push for every announcement:** the push text is the body with HTML removed (tags dropped, common entities decoded,
 whitespace collapsed, first 150 characters), and tapping it opens that announcement (`/announcements/{id}` in the
@@ -5053,7 +5054,7 @@ send personal wishes that persist permanently in the member's birthday book.
 
 **Cron:** Runs daily at 6 AM. Queries all active members whose `birthMonth` and `birthDay` match today and whose `birthdayGreetedYear` is not the current year, then for each member (in an isolated try/catch):
 
-- Creates an `ALL`-audience announcement with `expiresAt = 23:59:59` tonight
+- Creates an `ALL`-audience announcement with `expiresAt = DateService.endOfDay()` (23:59:59.999 tonight in the church timezone, not the server's)
 - Updates `birthdayGreetedYear` to the current year (only after the announcement saves)
 - Sends the birthday email (fire-and-forget via email queue)
 
@@ -5087,6 +5088,9 @@ older direct-repository-insert pattern, which predates that helper and doesn't p
 **Eligibility:** `ACTIVE` members with a non-null `dateJoinedChurch` whose join month/day matches today, excluding
 the join year itself (a member who joined today this year has "0 years," not an anniversary), and not already
 greeted this calendar year.
+
+**Expiry:** the announcement expires at the close of the day (`DateService.endOfDay()`, church timezone), like birthdays.
+Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts created before this fix the same expiry.
 
 **Email:** `membership-anniversary` template, `EmailCategory.MEMBERSHIP_ANNIVERSARY` (togglable via
 `EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED`, default `true`, same convention as every other email category).
@@ -19458,7 +19462,7 @@ send personal wishes that persist permanently in the member's birthday book.
 
 **Cron:** Runs daily at 6 AM. Queries all active members whose `birthMonth` and `birthDay` match today and whose `birthdayGreetedYear` is not the current year, then for each member (in an isolated try/catch):
 
-- Creates an `ALL`-audience announcement with `expiresAt = 23:59:59` tonight
+- Creates an `ALL`-audience announcement with `expiresAt = DateService.endOfDay()` (23:59:59.999 tonight in the church timezone, not the server's)
 - Updates `birthdayGreetedYear` to the current year (only after the announcement saves)
 - Sends the birthday email (fire-and-forget via email queue)
 
@@ -19492,6 +19496,9 @@ older direct-repository-insert pattern, which predates that helper and doesn't p
 **Eligibility:** `ACTIVE` members with a non-null `dateJoinedChurch` whose join month/day matches today, excluding
 the join year itself (a member who joined today this year has "0 years," not an anniversary), and not already
 greeted this calendar year.
+
+**Expiry:** the announcement expires at the close of the day (`DateService.endOfDay()`, church timezone), like birthdays.
+Tenant migration `1805788800000-ExpireOldAnniversaryAnnouncements` gave posts created before this fix the same expiry.
 
 **Email:** `membership-anniversary` template, `EmailCategory.MEMBERSHIP_ANNIVERSARY` (togglable via
 `EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED`, default `true`, same convention as every other email category).

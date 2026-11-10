@@ -16,6 +16,7 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { DateService } from '../../utility/service/date.service';
 
 @Injectable()
 export class MembershipAnniversaryService implements OnApplicationBootstrap {
@@ -34,6 +35,7 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
+    private readonly dateService: DateService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
@@ -145,6 +147,8 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     await this.announcementService.createSystemAnnouncement(
       `Celebrating ${years} years with ${member.firstname}!`,
       `Today marks ${years} years since ${member.firstname} ${member.lastname} joined our church family. Join us in celebrating this milestone!`,
+      undefined,
+      this.dateService.endOfDay(),
     );
 
     this.utilityService.sendEmailWithTemplate(

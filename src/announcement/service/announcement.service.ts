@@ -230,6 +230,7 @@ export class AnnouncementService {
     title: string,
     body: string,
     actorId?: string,
+    expiresAt: Date | null = null,
   ): Promise<Announcement> {
     const announcement = this.announcementRepo.create({
       title,
@@ -237,6 +238,7 @@ export class AnnouncementService {
       audience: AnnouncementAudienceEnum.ALL,
       author: null,
       publishedAt: new Date(),
+      expiresAt,
     });
 
     const saved = await this.announcementRepo.save(announcement);

@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DateService } from '../../utility/service/date.service';
+
+const END_OF_DAY = new Date('2026-06-15T22:59:59.999Z');
 import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
@@ -119,6 +122,7 @@ describe('BirthdayService', () => {
         { provide: SanitizationService, useValue: mockSanitizationService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: DateService, useValue: { endOfDay: () => END_OF_DAY } },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -171,8 +175,7 @@ describe('BirthdayService', () => {
 
       const createCall = mockAnnouncementRepo.create.mock.calls[0][0];
       expect(createCall.audience).toBe(AnnouncementAudienceEnum.ALL);
-      expect(createCall.expiresAt).toBeInstanceOf(Date);
-      expect(createCall.expiresAt.getHours()).toBe(23);
+      expect(createCall.expiresAt).toBe(END_OF_DAY);
     });
 
     it('queries only ACTIVE members not yet greeted this year', async () => {

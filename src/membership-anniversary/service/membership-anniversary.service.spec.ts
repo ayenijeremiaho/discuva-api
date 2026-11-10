@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DateService } from '../../utility/service/date.service';
+
+const END_OF_DAY = new Date('2026-06-15T22:59:59.999Z');
 
 // AnnouncementService transitively imports SanitizationService, which pulls
 // in jsdom — mocked here (as announcement.service.spec.ts does) so this
@@ -95,6 +98,7 @@ describe('MembershipAnniversaryService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: DateService, useValue: { endOfDay: () => END_OF_DAY } },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -135,6 +139,8 @@ describe('MembershipAnniversaryService', () => {
       ).toHaveBeenCalledWith(
         expect.stringContaining('5 years'),
         expect.stringContaining('5 years'),
+        undefined,
+        END_OF_DAY,
       );
       expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
         'john@example.com',
