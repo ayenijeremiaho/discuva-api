@@ -461,6 +461,17 @@ export class DiscuvaAccountService {
     return first.tenantId;
   }
 
+  async setHome(
+    accountId: string,
+    networkRootId: string,
+    homeTenantId: string,
+  ): Promise<void> {
+    await this.homeRepo.upsert({ accountId, networkRootId, homeTenantId }, [
+      'accountId',
+      'networkRootId',
+    ]);
+  }
+
   async linkHere(memberId: string): Promise<DiscuvaAccountLink | null> {
     return this.linkRepo.findOne({
       where: { tenantId: this.cls.get('tenantId'), memberId },

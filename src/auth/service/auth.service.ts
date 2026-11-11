@@ -58,6 +58,7 @@ import { PlatformSettingsService } from '../../platform-admin/service/platform-s
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 
 export const DEVICE_CONFIRMATION_REQUIRED = 'DEVICE_CONFIRMATION_REQUIRED';
+export const MOVED_BRANCH = 'MOVED_BRANCH';
 
 // Wrong-password counts kept apart so tries from one place can't lock someone out everywhere.
 interface LoginBucket {
@@ -184,6 +185,7 @@ export class AuthService {
       );
     }
 
+    await this.assertNotMoved(member);
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new UnauthorizedException(
         'Your account is inactive. Contact admin.',
@@ -391,7 +393,7 @@ export class AuthService {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
     ]);
-    this.assertCanSignIn(member);
+    await this.assertCanSignIn(member);
 
     const tokens = await this.generateTokens(
       member.id,
@@ -413,7 +415,7 @@ export class AuthService {
     member: Member,
     action: 'MEMBER_LOGIN',
   ): Promise<JwtResponse> {
-    this.assertCanSignIn(member);
+    await this.assertCanSignIn(member);
     const tokens = await this.generateTokens(
       member.id,
       member.role,
@@ -428,7 +430,26 @@ export class AuthService {
     return tokens;
   }
 
-  private assertCanSignIn(member: Member): void {
+  // Only reached after the password or another proof, so the new branch is told to its owner alone.
+  private async assertNotMoved(member: Member): Promise<void> {
+    if (member.status !== MemberStatusEnum.TRANSFERRED) return;
+    const to = member.transferredToTenantId
+      ? await this.tenantRepo.findOne({
+          where: { id: member.transferredToTenantId, isActive: true },
+          select: { id: true, name: true, subdomain: true },
+        })
+      : null;
+    throw new ForbiddenException({
+      message: to
+        ? `You've moved to ${to.name}. Sign in there.`
+        : "You've moved to another branch. Sign in there.",
+      code: MOVED_BRANCH,
+      subdomain: to?.subdomain ?? null,
+    });
+  }
+
+  private async assertCanSignIn(member: Member): Promise<void> {
+    await this.assertNotMoved(member);
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new UnauthorizedException(
         'Your account is inactive. Contact admin.',

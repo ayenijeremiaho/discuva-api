@@ -35,7 +35,10 @@ import {
 import { CheckInDto } from '../dto/check-in.dto';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
-import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import {
+  MemberStatusEnum,
+  UNCOUNTED_MEMBER_STATUSES,
+} from '../../member/enums/member-status.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { Member } from '../../member/entity/member.entity';
 import { MemberService } from '../../member/service/member.service';
@@ -1024,7 +1027,9 @@ export class AttendanceService {
       )
       .from('members', 'm')
       .where('m.created_at >= :since', { since })
-      .andWhere('m.status <> :pending', { pending: MemberStatusEnum.PENDING })
+      .andWhere('m.status NOT IN (:...uncounted)', {
+        uncounted: UNCOUNTED_MEMBER_STATUSES,
+      })
       .groupBy("DATE_TRUNC('week', m.created_at)")
       .orderBy("DATE_TRUNC('week', m.created_at)", 'ASC')
       .getRawMany<{ week: string; newMembers: string; newWorkers: string }>();
@@ -1524,6 +1529,11 @@ export class AttendanceService {
   }
 
   private assertMemberActive(member: Member): void {
+    if (member.status === MemberStatusEnum.TRANSFERRED) {
+      throw new BadRequestException(
+        "You've moved to another branch. Check in from that branch's app.",
+      );
+    }
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new BadRequestException('Your account is inactive. Contact admin.');
     }

@@ -42360,6 +42360,187 @@
             "description": "No auth; send X-Tenant-Subdomain. The network this church belongs to: the top church and every active church with its path, for the network app's branch picker. Null outside a network or with networks off."
           },
           "response": []
+        },
+        {
+          "name": "Move Branch: Options (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer"
+              ]
+            },
+            "description": "Member session. Whether this person can move home branch, and any request waiting for release."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"available\": true,\n  \"hasAccount\": true,\n  \"isAdmin\": false,\n  \"needsRelease\": false,\n  \"pending\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "Move Branch: Request (member app)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer"
+              ]
+            },
+            "description": "Member session. Members move at once and get a one-use pass for /account/handoff at the new branch; workers get REQUESTED and wait for their branch to release them. 400 outside the network or without a Discuva account, 403 for admins, 409 if a request is already waiting.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toTenantId\": \"uuid\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"MOVED\",\n  \"subdomain\": \"abc-ikeja\",\n  \"token\": \"one-use-pass\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Move Branch: Cancel Request (member app)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer"
+              ]
+            },
+            "description": "Member session. Cancels the waiting request. 404 if there is none."
+          },
+          "response": [
+            {
+              "name": "204",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Move Requests (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer",
+                "requests"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Workers from this branch waiting to be released."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"memberId\": \"uuid\",\n    \"name\": \"Ada Obi\",\n    \"photoUrl\": null,\n    \"toTenantId\": \"uuid\",\n    \"toPath\": \"ABC \\u00b7 Ikeja\",\n    \"requestedAt\": \"2026-11-11T09:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Release Move Request (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer/requests/:id/release",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer",
+                "requests",
+                ":id",
+                "release"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Moves the worker now; they arrive as a member. A worker can't release themselves (403)."
+          },
+          "response": [
+            {
+              "name": "204",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Decline Move Request (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/transfer/requests/:id/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "transfer",
+                "requests",
+                ":id",
+                "decline"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Optional reason (max 300), emailed to the worker.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Please finish this quarter's rota first\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "204",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
         }
       ]
     },

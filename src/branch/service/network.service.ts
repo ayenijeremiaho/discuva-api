@@ -427,6 +427,17 @@ export class NetworkService {
     return { network };
   }
 
+  // Display paths ("ABC · Lagos · Ikeja") for churches in one network.
+  async pathsOf(rootId: string, ids: string[]): Promise<Map<string, string>> {
+    const tree = await this.loadTree(rootId);
+    const levels = new Map<number, string>();
+    return new Map(
+      ids
+        .filter((id) => tree.byId.has(id))
+        .map((id) => [id, this.toNode(tree, id, levels).path]),
+    );
+  }
+
   // Console: every network, with its size and depth. Structure and figures only, never anyone's details.
   async platformNetworks(): Promise<
     {

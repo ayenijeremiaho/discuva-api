@@ -15,7 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
-import { AuthService } from './auth.service';
+import { AuthService, MOVED_BRANCH } from './auth.service';
 import { AdminService } from '../../admin/service/admin.service';
 import { AdminTwoFactorService } from '../../admin/service/admin-two-factor.service';
 import { MemberService } from '../../member/service/member.service';
@@ -297,6 +297,29 @@ describe('AuthService', () => {
       await expect(
         service.validateMember('inactive@test.com', 'pass'),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('tells a member who moved branch where to sign in now', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'moved@test.com',
+        password: 'hashed_pass',
+        status: MemberStatusEnum.TRANSFERRED,
+        transferredToTenantId: 't-ikeja',
+        role: MemberRoleEnum.MEMBER,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      (mockTenantRepo as any).findOne = jest.fn().mockResolvedValue({
+        id: 't-ikeja',
+        name: 'ABC Ikeja',
+        subdomain: 'abc-ikeja',
+      });
+
+      await expect(
+        service.validateMember('moved@test.com', 'pass'),
+      ).rejects.toMatchObject({
+        response: { code: MOVED_BRANCH, subdomain: 'abc-ikeja' },
+      });
     });
 
     it('should return MemberAuth with id and role on success', async () => {

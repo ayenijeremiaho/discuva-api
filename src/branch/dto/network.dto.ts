@@ -59,3 +59,15 @@ export class GivingSharingDto {
   @IsBoolean()
   shareGivingWithParent: boolean;
 }
+
+export class TransferRequestDto {
+  @IsUUID()
+  toTenantId: string;
+}
+
+export class DeclineTransferDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}

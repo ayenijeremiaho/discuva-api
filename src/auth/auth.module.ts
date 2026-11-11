@@ -59,6 +59,6 @@ import { UtilityModule } from '../utility/utility.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PasswordChangeRequiredGuard },
   ],
-  exports: [AuthService],
+  exports: [AuthService, AccountSignInService],
 })
 export class AuthModule {}

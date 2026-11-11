@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Not } from 'typeorm';
+import { In, Not } from 'typeorm';
 import { DashboardService } from './dashboard.service';
 import { MemberService } from '../../member/service/member.service';
 import { AttendanceService } from '../../attendance/service/attendance.service';
@@ -10,7 +10,10 @@ import { ClassesService } from '../../classes/service/classes.service';
 import { AdminService } from '../../admin/service/admin.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
-import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import {
+  MemberStatusEnum,
+  UNCOUNTED_MEMBER_STATUSES,
+} from '../../member/enums/member-status.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 
 const mockCacheService = {
@@ -163,13 +166,13 @@ describe('DashboardService', () => {
       expect(mockMemberService.count).toHaveBeenCalledWith({
         where: {
           role: MemberRoleEnum.MEMBER,
-          status: Not(MemberStatusEnum.PENDING),
+          status: Not(In(UNCOUNTED_MEMBER_STATUSES)),
         },
       });
       expect(mockMemberService.count).toHaveBeenCalledWith({
         where: {
           role: MemberRoleEnum.WORKER,
-          status: Not(MemberStatusEnum.PENDING),
+          status: Not(In(UNCOUNTED_MEMBER_STATUSES)),
         },
       });
       expect(mockAdminService.countActive).toHaveBeenCalledTimes(1);

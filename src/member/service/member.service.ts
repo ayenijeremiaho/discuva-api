@@ -26,7 +26,10 @@ import { MemberSessionService } from './member-session.service';
 import { ConfigService } from '@nestjs/config';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { MemberRoleEnum } from '../enums/member-role.enum';
-import { MemberStatusEnum } from '../enums/member-status.enum';
+import {
+  MemberStatusEnum,
+  UNCOUNTED_MEMBER_STATUSES,
+} from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { SignupDto } from '../dto/signup.dto';
 import { UpdateMemberDto } from '../dto/update-member.dto';
@@ -56,6 +59,29 @@ const MY_PROFILE_RELATIONS = [
   'clergy.title',
 ];
 
+// What travels with a member to another branch; church life (attendance, giving, roles, notes) stays.
+const TRANSFER_FIELDS = [
+  'firstname',
+  'lastname',
+  'phoneNumber',
+  'gender',
+  'birthDay',
+  'birthMonth',
+  'birthYear',
+  'maritalStatus',
+  'address',
+  'emergencyContactName',
+  'emergencyContactPhone',
+  'emergencyContactRelationship',
+  'photoUrl',
+  'photoPublicId',
+  'yearBornAgain',
+  'yearBaptized',
+  'baptizedWithHolyGhost',
+  'appearanceMode',
+  'useChurchTheme',
+  'mutedNotifications',
+] as const satisfies readonly (keyof Member)[];
 @Injectable()
 export class MemberService {
   private readonly logger = new Logger(MemberService.name);
@@ -163,6 +189,81 @@ export class MemberService {
       targetEmail: saved.email,
     });
     return saved;
+  }
+
+  // Arriving from another branch: the same person and original join date; workers arrive as members.
+  async createFromTransfer(
+    from: Member,
+    account: { id: string; password: string },
+    deviceId: string | null,
+    joinedOn: Date,
+  ): Promise<Member> {
+    const pending = await this.pendingSignupFor(from.email);
+    if (!pending) {
+      await this.verification.assertRoomForMembers(() =>
+        this.countProvenMembers(),
+      );
+    }
+    const member = this.memberRepository.create({
+      ...Object.fromEntries(TRANSFER_FIELDS.map((f) => [f, from[f]])),
+      id: pending?.id,
+      email: from.email,
+      password: account.password,
+      changedPassword: true,
+      deviceId,
+      discuvaAccountId: account.id,
+      role: MemberRoleEnum.MEMBER,
+      status: MemberStatusEnum.ACTIVE,
+      dateJoinedChurch: joinedOn,
+    });
+    const saved = await this.memberRepository.save(member);
+    this.auditLogService.log('MEMBER_JOINED_BY_TRANSFER', {
+      targetId: saved.id,
+      targetEmail: saved.email,
+    });
+    return saved;
+  }
+
+  // Moving back to a branch they left before: the old record comes back to life.
+  async welcomeBack(memberId: string): Promise<Member> {
+    const member = await this.getById(memberId);
+    if (member.status === MemberStatusEnum.INACTIVE) {
+      throw new BadRequestException(
+        "Your record at that branch is inactive. Please contact that branch's admins.",
+      );
+    }
+    if (member.status === MemberStatusEnum.PENDING) {
+      await this.activatePending(memberId);
+    } else if (member.status === MemberStatusEnum.TRANSFERRED) {
+      await this.verification.assertRoomForMembers(() =>
+        this.countProvenMembers(),
+      );
+      await this.memberRepository.update(memberId, {
+        status: MemberStatusEnum.ACTIVE,
+        transferredAt: null,
+        transferredToTenantId: null,
+      });
+    }
+    return this.getById(memberId);
+  }
+
+  // Kept here as history; serving roles end so rotas and teams stop counting on them.
+  async markTransferred(memberId: string, toTenantId: string): Promise<void> {
+    const member = await this.getById(memberId, ['workerProfile']);
+    await this.memberRepository.manager.transaction(async (em) => {
+      if (member.workerProfile) await this.deactivateWorkerAccess(member, em);
+      await em.update(Member, memberId, {
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.TRANSFERRED,
+        transferredAt: new Date(),
+        transferredToTenantId: toTenantId,
+        serveInterestAt: null,
+      });
+    });
+    this.auditLogService.log('MEMBER_TRANSFERRED', {
+      targetId: member.id,
+      targetEmail: member.email,
+    });
   }
 
   // A member who adds this church to their account takes the account's password; their phone here stays.
@@ -1183,6 +1284,11 @@ export class MemberService {
       throw new BadRequestException('Status must be ACTIVE or INACTIVE.');
     }
     const member = await this.getById(memberId);
+    if (member.status === MemberStatusEnum.TRANSFERRED) {
+      throw new BadRequestException(
+        'This person moved to another branch. Their record here is kept as history.',
+      );
+    }
     if (member.status === status) {
       throw new BadRequestException(
         `This member's account is already ${status.toLowerCase()}.`,
@@ -1450,6 +1556,14 @@ export class MemberService {
     return member;
   }
 
+  findByIds(ids: string[]): Promise<Member[]> {
+    if (!ids.length) return Promise.resolve([]);
+    return this.memberRepository.find({
+      where: { id: In(ids) },
+      select: { id: true, firstname: true, lastname: true, photoUrl: true },
+    });
+  }
+
   async getByIdWithCredentials(id: string): Promise<Member> {
     const member = await this.memberRepository
       .createQueryBuilder('member')
@@ -1690,7 +1804,7 @@ export class MemberService {
 
   countProvenMembers(): Promise<number> {
     return this.memberRepository.count({
-      where: { status: Not(MemberStatusEnum.PENDING) },
+      where: { status: Not(In(UNCOUNTED_MEMBER_STATUSES)) },
     });
   }
 

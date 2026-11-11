@@ -99,6 +99,13 @@ export class Member extends BaseEntity {
   @Column({ nullable: true, type: 'date' })
   dateJoinedChurch: Date;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  transferredAt: Date | null;
+
+  // A branch in the same network; a plain id because tenants live in the root schema.
+  @Column({ type: 'uuid', nullable: true })
+  transferredToTenantId: string | null;
+
   // Set when a member asks to serve in the workforce; cleared on promotion.
   @Column({ type: 'timestamptz', nullable: true })
   serveInterestAt: Date | null;

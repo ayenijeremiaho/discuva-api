@@ -102,6 +102,10 @@ export class PushNotificationService implements OnModuleInit {
     );
   }
 
+  subscriptionOf(memberId: string): Promise<PushSubscription | null> {
+    return this.subRepo.findOne({ where: { memberId } });
+  }
+
   async hasSubscription(memberId: string): Promise<boolean> {
     return this.subRepo.exists({ where: { memberId } });
   }

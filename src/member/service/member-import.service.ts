@@ -19,7 +19,10 @@ import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
 import { Department } from '../../department/entity/department.entity';
 import { MemberRoleEnum } from '../enums/member-role.enum';
-import { MemberStatusEnum } from '../enums/member-status.enum';
+import {
+  MemberStatusEnum,
+  UNCOUNTED_MEMBER_STATUSES,
+} from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { SignupDto } from '../dto/signup.dto';
 import { ExcelService } from '../../utility/service/excel.service';
@@ -457,7 +460,7 @@ export class MemberImportService {
     await this.verification.assertRoomForMembers(
       () =>
         this.memberRepository.count({
-          where: { status: Not(MemberStatusEnum.PENDING) },
+          where: { status: Not(In(UNCOUNTED_MEMBER_STATUSES)) },
         }),
       validRows.length,
     );
