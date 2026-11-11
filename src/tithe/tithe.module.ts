@@ -44,5 +44,6 @@ import { GivingOption } from '../finance/entity/giving-option.entity';
   ],
   controllers: [TitheAdminController, TitheMemberController],
   providers: [TitheService, TitheProcessor],
+  exports: [TitheService],
 })
 export class TitheModule {}

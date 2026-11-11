@@ -42541,6 +42541,103 @@
               "body": ""
             }
           ]
+        },
+        {
+          "name": "Past Branches (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "history"
+              ]
+            },
+            "description": "Member session. Branches this person moved away from, newest move first, excluding the current one."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"tenantId\": \"uuid\",\n    \"path\": \"ABC · Lekki\",\n    \"movedAt\": \"2026-11-09T10:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Past Branch History (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/history/:tenantId?year=2026",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "history",
+                ":tenantId"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2026"
+                }
+              ]
+            },
+            "description": "Member session. Read-only attendance and giving from their old record there; cached 24h. 404 unless they moved away from that branch."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"path\": \"ABC · Lekki\",\n  \"currency\": \"NGN\",\n  \"joinedOn\": \"2019-03-01\",\n  \"movedAt\": \"2026-11-09T10:00:00.000Z\",\n  \"attendance\": {\n    \"total\": 78,\n    \"last\": \"2026-11-02T09:00:00.000Z\",\n    \"byYear\": [\n      {\n        \"year\": 2026,\n        \"count\": 30\n      }\n    ]\n  },\n  \"giving\": {\n    \"year\": 2026,\n    \"years\": [\n      2026,\n      2025\n    ],\n    \"total\": 50000,\n    \"count\": 4,\n    \"byType\": [\n      {\n        \"type\": \"Tithe\",\n        \"total\": 40000,\n        \"count\": 3\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Email Past Branch Statement (member app)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/history/:tenantId/statement?fromMonth=2026-01&toMonth=2026-12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "history",
+                ":tenantId",
+                "statement"
+              ],
+              "query": [
+                {
+                  "key": "fromMonth",
+                  "value": "2026-01"
+                },
+                {
+                  "key": "toMonth",
+                  "value": "2026-12"
+                }
+              ]
+            },
+            "description": "Member session. Emails the old branch's giving statement for the range, from that branch."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"message\": \"Your giving statement has been emailed to ada@example.com.\",\n  \"recordCount\": 4\n}"
+            }
+          ]
         }
       ]
     },

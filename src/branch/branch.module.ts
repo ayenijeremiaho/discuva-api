@@ -8,6 +8,9 @@ import { NetworkMove } from './entity/network-move.entity';
 import { NetworkTransfer } from './entity/network-transfer.entity';
 import { NetworkTransferService } from './service/network-transfer.service';
 import { NetworkTransferController } from './controller/network-transfer.controller';
+import { BranchHistoryController } from './controller/branch-history.controller';
+import { BranchHistoryService } from './service/branch-history.service';
+import { TitheModule } from '../tithe/tithe.module';
 import { Admin } from '../admin/entity/admin.entity';
 import { MemberModule } from '../member/member.module';
 import { AuthModule } from '../auth/auth.module';
@@ -43,6 +46,7 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     TenantModule,
     MemberModule,
     AuthModule,
+    TitheModule,
   ],
   controllers: [
     BranchController,
@@ -50,11 +54,13 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     PublicNetworkController,
     PlatformNetworkController,
     NetworkTransferController,
+    BranchHistoryController,
   ],
   providers: [
     BranchRollupService,
     NetworkService,
     NetworkTransferService,
+    BranchHistoryService,
     BranchRollupScheduler,
   ],
   exports: [NetworkService],
