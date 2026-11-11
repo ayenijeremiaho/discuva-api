@@ -43,6 +43,10 @@ export class Event extends BaseEntity {
   @Column({ name: 'attendance_marked', default: false })
   attendanceMarked: boolean;
 
+  // Shown to every branch under this church through the network's shared copy (Phase 4).
+  @Column({ name: 'send_to_branches', default: false })
+  sendToBranches: boolean;
+
   @Column({ name: 'online_attendance_enabled', default: false })
   onlineAttendanceEnabled: boolean;
 

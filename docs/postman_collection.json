@@ -5497,7 +5497,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\",\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5513,7 +5513,7 @@
                 "events"
               ]
             },
-            "description": "Create a single non-recurring event. endDate defaults to eventDate if omitted. Slot times must fall within [eventDate 00:00, endDate 23:59]. Slots are auto-sorted ASC and validated for no overlap."
+            "description": "Create a single non-recurring event. endDate defaults to eventDate if omitted. Slot times must fall within [eventDate 00:00, endDate 23:59]. Slots are auto-sorted ASC and validated for no overlap. sendToBranches (optional): show this event to every branch under this church (a church with branches only)."
           },
           "response": [
             {
@@ -6100,7 +6100,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Easter Conference\",\n  \"description\": \"\",\n  \"onlineAttendanceEnabled\": false,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2027-04-05T09:00:00.000Z\",\n      \"endTime\": \"2027-04-05T11:00:00.000Z\",\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Easter Conference\",\n  \"description\": \"\",\n  \"onlineAttendanceEnabled\": false,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2027-04-05T09:00:00.000Z\",\n      \"endTime\": \"2027-04-05T11:00:00.000Z\",\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ],\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6117,7 +6117,7 @@
                 "preview"
               ]
             },
-            "description": "EVENTS_WRITE. Same body as Create Event (add eventId to check a change to one date). Saves nothing. Returns { dates: [{ date, startTime, endTime, status: READY|SKIPPED|BLOCKED, clashes: [{ service, other, why }] }], givingWay: [{ seriesName, date, day, clash }], canSave }."
+            "description": "EVENTS_WRITE. Same body as Create Event (add eventId to check a change to one date). Saves nothing. Returns { dates: [{ date, startTime, endTime, status: READY|SKIPPED|BLOCKED, clashes: [{ service, other, why }] }], givingWay: [{ seriesName, date, day, clash }], canSave }. sendToBranches (optional): show this event to every branch under this church (a church with branches only)."
           },
           "response": []
         },
@@ -6237,7 +6237,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true,\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6254,7 +6254,7 @@
                 "templates"
               ]
             },
-            "description": "ADMIN (EVENTS_WRITE). Saves a reusable setup. `defaultRecurrence.weekday` (0 = Sunday) lets the admin pre-fill the next matching date. 409 if the name exists (case-insensitive)."
+            "description": "ADMIN (EVENTS_WRITE). Saves a reusable setup. `defaultRecurrence.weekday` (0 = Sunday) lets the admin pre-fill the next matching date. 409 if the name exists (case-insensitive). sendToBranches (optional): show this event to every branch under this church (a church with branches only)."
           },
           "response": [
             {
@@ -6283,7 +6283,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true,\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6301,7 +6301,7 @@
                 "{{eventTemplateId}}"
               ]
             },
-            "description": "ADMIN (EVENTS_WRITE). Replaces a service type (same body as create)."
+            "description": "ADMIN (EVENTS_WRITE). Replaces a service type (same body as create). sendToBranches (optional): show this event to every branch under this church (a church with branches only)."
           },
           "response": [
             {
@@ -10996,7 +10996,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Church Picnic — July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\"\n}",
+              "raw": "{\n  \"title\": \"Church Picnic \\u2014 July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\",\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11012,7 +11012,7 @@
                 "announcements"
               ]
             },
-            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted. sendViaSms (optional, requires the caller's admin role to hold SMS_SEND - 403 otherwise) triggers an SMS to every resolved recipient's phone number; smsBody is required whenever sendViaSms=true and is deliberately separate from body since SMS is billed per segment (see SMS Module). SMS sends are allowed 08:00-19:50 in CHURCH_TIMEZONE. The announcement remains created if sending fails; its response includes a transient smsDispatch outcome and provider message."
+            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted. sendViaSms (optional, requires the caller's admin role to hold SMS_SEND - 403 otherwise) triggers an SMS to every resolved recipient's phone number; smsBody is required whenever sendViaSms=true and is deliberately separate from body since SMS is billed per segment (see SMS Module). SMS sends are allowed 08:00-19:50 in CHURCH_TIMEZONE. The announcement remains created if sending fails; its response includes a transient smsDispatch outcome and provider message. sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "event": [
             {
@@ -11105,7 +11105,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Ushering Team Meeting\",\n  \"body\": \"Mandatory meeting for all ushers this Saturday at 7am.\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\"\n}",
+              "raw": "{\n  \"title\": \"Ushering Team Meeting\",\n  \"body\": \"Mandatory meeting for all ushers this Saturday at 7am.\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\",\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11120,7 +11120,8 @@
               "path": [
                 "announcements"
               ]
-            }
+            },
+            "description": " sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "response": [
             {
@@ -11149,7 +11150,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Session Moved to 6pm\",\n  \"body\": \"This week's session has moved to 6pm — same link.\",\n  \"audience\": \"CLASS\",\n  \"classId\": \"{{classId}}\"\n}",
+              "raw": "{\n  \"title\": \"Session Moved to 6pm\",\n  \"body\": \"This week's session has moved to 6pm \\u2014 same link.\",\n  \"audience\": \"CLASS\",\n  \"classId\": \"{{classId}}\",\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11164,7 +11165,8 @@
               "path": [
                 "announcements"
               ]
-            }
+            },
+            "description": " sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "response": [
             {
@@ -11193,7 +11195,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Pastoral Follow-up\",\n  \"body\": \"The pastor would like to meet with you after Sunday service. Please see the office.\",\n  \"audience\": \"INDIVIDUAL\",\n  \"targetMemberId\": \"{{memberId}}\"\n}",
+              "raw": "{\n  \"title\": \"Pastoral Follow-up\",\n  \"body\": \"The pastor would like to meet with you after Sunday service. Please see the office.\",\n  \"audience\": \"INDIVIDUAL\",\n  \"targetMemberId\": \"{{memberId}}\",\n  \"sendToBranches\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11209,7 +11211,7 @@
                 "announcements"
               ]
             },
-            "description": "Sends a private announcement visible only to the specified member. targetMemberId is required when audience=INDIVIDUAL."
+            "description": "Sends a private announcement visible only to the specified member. targetMemberId is required when audience=INDIVIDUAL. sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "response": [
             {
@@ -11247,8 +11249,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Workers Meeting This Saturday\",\n  \"body\": \"Mandatory workers meeting at 7am. All departments must be represented.\",\n  \"audience\": \"WORKERS_ONLY\"\n}"
-            }
+              "raw": "{\n  \"title\": \"Workers Meeting This Saturday\",\n  \"body\": \"Mandatory workers meeting at 7am. All departments must be represented.\",\n  \"audience\": \"WORKERS_ONLY\",\n  \"sendToBranches\": false\n}"
+            },
+            "description": " sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "response": [
             {
@@ -11280,8 +11283,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"New Members Class\",\n  \"body\": \"A new members orientation class starts next Sunday. Please sign up at the information desk.\",\n  \"audience\": \"MEMBERS_ONLY\"\n}"
-            }
+              "raw": "{\n  \"title\": \"New Members Class\",\n  \"body\": \"A new members orientation class starts next Sunday. Please sign up at the information desk.\",\n  \"audience\": \"MEMBERS_ONLY\",\n  \"sendToBranches\": false\n}"
+            },
+            "description": " sendToBranches (optional): copy to every branch under this church; ALL, MEMBERS_ONLY or WORKERS_ONLY audiences only."
           },
           "response": [
             {
@@ -11601,6 +11605,42 @@
             "description": "Any authenticated member/worker. Returns { summary: [{emoji,count}], myReaction }, where myReaction is the calling member's own current reaction (or null)."
           },
           "response": []
+        },
+        {
+          "name": "Hide Network Announcement Copy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/announcements/:id/network-hidden",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                ":id",
+                "network-hidden"
+              ]
+            },
+            "description": "ANNOUNCEMENTS_WRITE. On a branch's copy of a network announcement: hide it from (or show it to) members here. Copies can't be edited or deleted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hidden\": true\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"uuid\",\n  \"networkHidden\": true\n}"
+            }
+          ]
         }
       ]
     },
@@ -42824,6 +42864,143 @@
               "status": "OK",
               "code": 200,
               "body": "[\n  {\n    \"id\": \"uuid\",\n    \"name\": \"Bola Ade\",\n    \"photoUrl\": null,\n    \"fromPath\": \"ABC · Ikeja\",\n    \"serviceName\": \"First Service\",\n    \"checkinTime\": \"2026-11-15T08:05:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Network Events Shared With Us (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/events?from=2026-11-29T00:00:00Z&to=2026-12-27T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-11-29T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-27T00:00:00Z"
+                }
+              ]
+            },
+            "description": "Member session. Events churches above this one sent to all branches, minus ones this branch hid. Up to 62 days."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"tenantId\": \"uuid\",\n    \"eventId\": \"uuid\",\n    \"name\": \"Network Convention\",\n    \"description\": \"Three days of worship\",\n    \"startTime\": \"2026-12-01T09:00:00.000Z\",\n    \"endTime\": \"2026-12-01T12:00:00.000Z\",\n    \"venueName\": \"Main Hall\",\n    \"serviceCount\": 1,\n    \"fromPath\": \"ABC\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Network Events Shared Here (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/events/shared",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "events",
+                "shared"
+              ]
+            },
+            "description": "EVENTS_READ. What the network shares with this church over the next 60 days, hidden ones included."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"tenantId\": \"uuid\",\n    \"eventId\": \"uuid\",\n    \"name\": \"Network Convention\",\n    \"description\": \"Three days of worship\",\n    \"startTime\": \"2026-12-01T09:00:00.000Z\",\n    \"endTime\": \"2026-12-01T12:00:00.000Z\",\n    \"venueName\": \"Main Hall\",\n    \"serviceCount\": 1,\n    \"fromPath\": \"ABC\",\n    \"hidden\": false\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Hide a Shared Network Event (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/events/:tenantId/:eventId/hidden",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "events",
+                ":tenantId",
+                ":eventId",
+                "hidden"
+              ]
+            },
+            "description": "EVENTS_WRITE. Hide or show a shared event for this church's members. 404 unless shared by a church above.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hidden\": true\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "204",
+              "status": "OK",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Network Agenda (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/agenda?from=2026-11-30T00:00:00Z&to=2026-12-07T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "agenda"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-11-30T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-07T00:00:00Z"
+                }
+              ]
+            },
+            "description": "BRANCH_READ. Everything under the current church (or churchId under it), plus announcements sent to or received from branches. Up to 62 days."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"churches\": [\n    {\n      \"id\": \"uuid\",\n      \"path\": \"ABC\"\n    }\n  ],\n  \"events\": [\n    {\n      \"tenantId\": \"uuid\",\n      \"eventId\": \"uuid\",\n      \"name\": \"Network Convention\",\n      \"description\": \"Three days of worship\",\n      \"startTime\": \"2026-12-01T09:00:00.000Z\",\n      \"endTime\": \"2026-12-01T12:00:00.000Z\",\n      \"venueName\": \"Main Hall\",\n      \"serviceCount\": 1,\n      \"fromPath\": \"ABC\",\n      \"audience\": \"EVERYONE\",\n      \"shared\": true\n    }\n  ],\n  \"announcements\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Prayer week\",\n      \"publishedAt\": \"2026-11-30T08:00:00.000Z\",\n      \"fromPath\": null\n    }\n  ]\n}"
             }
           ]
         }

@@ -103,6 +103,13 @@ import { EventOverlapService } from './event-overlap.service';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { ScheduledEvent } from './event.service';
 import { EventOverlapRule } from '../enums/event-overlap-rule.enum';
+import { NetworkShareService } from '../../network-share/network-share.service';
+
+const mockNetworkShare = {
+  assertCanShare: jest.fn().mockResolvedValue(undefined),
+  announcementChanged: jest.fn().mockResolvedValue(undefined),
+  eventsChanged: jest.fn().mockResolvedValue(undefined),
+};
 
 const mockOverlapService = {
   getRule: jest.fn().mockResolvedValue(EventOverlapRule.ALLOW),
@@ -130,6 +137,7 @@ describe('EventService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: NetworkShareService, useValue: mockNetworkShare },
         EventService,
         { provide: DataSource, useValue: mockDataSource },
         // Tenant queries run on the request's transaction, which the old DataSource mock stands in for.

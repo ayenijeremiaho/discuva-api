@@ -10,6 +10,13 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { EventRecurrencePatternEnum } from '../enums/event-recurrence-patterns.enums';
 import { EventOverlapService } from './event-overlap.service';
 import { EventOverlapRule } from '../enums/event-overlap-rule.enum';
+import { NetworkShareService } from '../../network-share/network-share.service';
+
+const mockNetworkShare = {
+  assertCanShare: jest.fn().mockResolvedValue(undefined),
+  announcementChanged: jest.fn().mockResolvedValue(undefined),
+  eventsChanged: jest.fn().mockResolvedValue(undefined),
+};
 
 const TZ = 'Africa/Lagos';
 
@@ -130,6 +137,7 @@ describe('EventSeriesService', () => {
     mockOverlapService.findClashes.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: NetworkShareService, useValue: mockNetworkShare },
         EventSeriesService,
         { provide: getRepositoryToken(EventSeries), useValue: mockSeriesRepo },
         { provide: getRepositoryToken(Event), useValue: mockEventRepo },

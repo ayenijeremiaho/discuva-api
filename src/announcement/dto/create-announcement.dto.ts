@@ -11,6 +11,11 @@ import {
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 
 export class CreateAnnouncementDto {
+  // Only for a church with branches, and whole-church audiences.
+  @IsOptional()
+  @IsBoolean()
+  sendToBranches?: boolean;
+
   @IsNotEmpty()
   @IsString()
   title: string;
@@ -63,6 +68,11 @@ export class CreateAnnouncementDto {
 }
 
 export class UpdateAnnouncementDto {
+  // Only for a church with branches, and whole-church audiences.
+  @IsOptional()
+  @IsBoolean()
+  sendToBranches?: boolean;
+
   @IsOptional()
   @IsString()
   title?: string;

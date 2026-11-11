@@ -140,6 +140,7 @@ describe('NetworkService', () => {
   };
   const cls = { get: jest.fn(() => current) };
   const networkVenues = { syncCurrent: jest.fn() };
+  const networkShare = { joinedNetwork: jest.fn() };
   const service = new NetworkService(
     tenantRepo as never,
     levelRepo as never,
@@ -153,6 +154,7 @@ describe('NetworkService', () => {
     cache as never,
     cls as never,
     networkVenues as never,
+    networkShare as never,
   );
 
   beforeEach(() => {
@@ -221,6 +223,7 @@ describe('NetworkService', () => {
 
       expect(rows.find((r) => r.id === 'abc')!.networkRootId).toBe('abc');
       expect(networkVenues.syncCurrent).toHaveBeenCalledWith('abc');
+      expect(networkShare.joinedNetwork).toHaveBeenCalledWith('abc');
       expect(provisioning.provision).toHaveBeenCalledWith(
         expect.objectContaining({
           subdomain: 'abc-lekki',

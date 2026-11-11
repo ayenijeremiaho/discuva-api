@@ -14,6 +14,15 @@ import { NetworkVisitService } from './service/network-visit.service';
 import { NetworkVisitController } from './controller/network-visit.controller';
 import { NetworkVisitCode } from './entity/network-visit-code.entity';
 import { NetworkVisitor } from './entity/network-visitor.entity';
+import { NetworkEvent } from './entity/network-event.entity';
+import { NetworkEventHide } from './entity/network-event-hide.entity';
+import { NetworkCopyService } from './service/network-copy.service';
+import { NetworkEventsService } from './service/network-events.service';
+import { NetworkEventsController } from './controller/network-events.controller';
+import { NetworkCopyProcessor } from './processor/network-copy.processor';
+import { Event } from '../event/entity/event.entity';
+import { Announcement } from '../announcement/entity/announcement.entity';
+import { AnnouncementModule } from '../announcement/announcement.module';
 import { TitheModule } from '../tithe/tithe.module';
 import { VenueModule } from '../venue/venue.module';
 import { AttendanceModule } from '../attendance/attendance.module';
@@ -32,6 +41,7 @@ import { PlatformNetworkController } from './controller/platform-network.control
 import { PublicNetworkController } from './controller/public-network.controller';
 import { TenantModule } from '../tenant/tenant.module';
 import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
+import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
 
 @Module({
   imports: [
@@ -42,6 +52,8 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
       NetworkMove,
       NetworkTransfer,
       NetworkVisitCode,
+      NetworkEvent,
+      NetworkEventHide,
       TenantRollup,
       Subscription,
     ]),
@@ -55,6 +67,8 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
       TitheRecord,
       Admin,
       NetworkVisitor,
+      Event,
+      Announcement,
     ]),
     TenantModule,
     MemberModule,
@@ -62,6 +76,7 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     TitheModule,
     VenueModule,
     AttendanceModule,
+    AnnouncementModule,
   ],
   controllers: [
     BranchController,
@@ -71,6 +86,7 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     NetworkTransferController,
     BranchHistoryController,
     NetworkVisitController,
+    NetworkEventsController,
   ],
   providers: [
     BranchRollupService,
@@ -78,7 +94,11 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     NetworkTransferService,
     BranchHistoryService,
     NetworkVisitService,
+    NetworkCopyService,
+    NetworkEventsService,
+    NetworkCopyProcessor,
     BranchRollupScheduler,
+    NetworkEventsScheduler,
   ],
   exports: [NetworkService],
 })

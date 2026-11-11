@@ -27,6 +27,9 @@ export class EventSeries extends BaseEntity {
   @Column({ name: 'online_attendance_enabled', default: false })
   onlineAttendanceEnabled: boolean;
 
+  @Column({ name: 'send_to_branches', default: false })
+  sendToBranches: boolean;
+
   @Column({ name: 'recurrence_pattern', type: 'varchar' })
   recurrencePattern: EventRecurrencePatternEnum;
 

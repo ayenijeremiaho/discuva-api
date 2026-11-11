@@ -23,6 +23,7 @@ const currentAdmin = { id: 'admin-1', member: { id: 'member-1' } } as Admin;
 const mockAuditLogService = { log: jest.fn() };
 
 const mockTenantRepo = {
+  exists: jest.fn().mockResolvedValue(false),
   findOneBy: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn().mockResolvedValue([]),
@@ -169,6 +170,26 @@ describe('TenantInfoController', () => {
         phoneRegion: 'GB',
         assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
         network: null,
+        networkRootId: undefined,
+        hasBranches: false,
+      });
+    });
+
+    it('says whether the church has branches under it, asking only inside a network', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        id: 'root-1',
+        networkRootId: 'root-1',
+      });
+      mockTenantRepo.exists.mockResolvedValueOnce(true);
+      const result = await controller.getInfo();
+      expect(result.hasBranches).toBe(true);
+      expect(mockTenantRepo.exists).toHaveBeenCalledWith({
+        where: {
+          networkRootId: 'root-1',
+          parentTenantId: 'root-1',
+          isActive: true,
+        },
       });
     });
 

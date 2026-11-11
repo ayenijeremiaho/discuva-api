@@ -80,6 +80,7 @@ import { SchedulerGateModule } from './tenant/scheduler-gate/scheduler-gate.modu
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { CommunicationProviderModule } from './communication-provider/communication-provider.module';
 import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
+import { NetworkShareModule } from './network-share/network-share.module';
 import { BranchModule } from './branch/branch.module';
 import { FormsModule } from './forms/forms.module';
 import { PagesModule } from './pages/pages.module';
@@ -259,6 +260,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     CommunicationProviderModule,
     GivingCheckoutModule,
     BranchModule,
+    NetworkShareModule,
     FormsModule,
     PagesModule,
     ChurchCalendarModule,

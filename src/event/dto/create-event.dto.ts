@@ -57,6 +57,11 @@ export class CreateEventDto {
   @IsBoolean()
   onlineAttendanceEnabled?: boolean;
 
+  // Shown to every branch under this church; only for a church with branches.
+  @IsOptional()
+  @IsBoolean()
+  sendToBranches?: boolean;
+
   @IsBoolean()
   isRecurring: boolean;
 

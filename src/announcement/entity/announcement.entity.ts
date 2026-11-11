@@ -66,4 +66,22 @@ export class Announcement extends BaseEntity {
   // segment, so admins compose a distinct, short message for it.
   @Column({ type: 'text', nullable: true })
   smsBody: string | null;
+
+  // Copied to every branch under this church (Phase 4); whole-church audiences only.
+  @Column({ default: false })
+  sendToBranches: boolean;
+
+  // On a branch's copy: the original announcement and the church that sent it. Branch admins can hide it, not change it.
+  @Column({ type: 'uuid', nullable: true })
+  networkSourceId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  networkSourceTenantId: string | null;
+
+  // Display path of the sender, e.g. "ABC · Lagos".
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  networkFrom: string | null;
+
+  @Column({ default: false })
+  networkHidden: boolean;
 }

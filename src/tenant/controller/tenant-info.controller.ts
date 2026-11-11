@@ -201,6 +201,16 @@ export class TenantInfoController {
     const tenant = (await withNetworkBranding(this.tenantRepository, own))!;
     const { assets, fromNetwork } =
       await this.tenantAssetService.forDisplay(own);
+    // Uses the (network_root_id, parent_tenant_id) index; asked only inside a network.
+    const hasBranches = own.networkRootId
+      ? await this.tenantRepository.exists({
+          where: {
+            networkRootId: own.networkRootId,
+            parentTenantId: own.id,
+            isActive: true,
+          },
+        })
+      : false;
     return {
       name: tenant.name,
       // Not sensitive — it's already visible in every discuva-member URL,
@@ -227,6 +237,8 @@ export class TenantInfoController {
       pwaShortName: tenant.pwaShortName,
       // Set when the church is in a network, so the member app knows to load the branch list.
       networkRootId: tenant.networkRootId,
+      // Whether "Send to all branches" applies: only a church with branches under it.
+      hasBranches,
       themePreset: tenant.themePreset,
       previousThemePreset: tenant.previousThemePreset,
       currency: tenant.currency,

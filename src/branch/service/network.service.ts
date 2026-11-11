@@ -27,6 +27,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { NetworkLevel } from '../entity/network-level.entity';
 import { NetworkMove } from '../entity/network-move.entity';
 import { NetworkVenueService } from '../../venue/service/network-venue.service';
+import { NetworkShareService } from '../../network-share/network-share.service';
 import { TenantRollup } from '../entity/tenant-rollup.entity';
 import { AddBranchDto } from '../dto/network.dto';
 
@@ -131,6 +132,7 @@ export class NetworkService {
     private readonly cache: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly networkVenues: NetworkVenueService,
+    private readonly networkShare: NetworkShareService,
   ) {}
 
   isAvailable(): Promise<boolean> {
@@ -255,6 +257,7 @@ export class NetworkService {
     if (!current.networkRootId) {
       await this.tenantRepo.update(current.id, { networkRootId: current.id });
       await this.networkVenues.syncCurrent(current.id);
+      await this.networkShare.joinedNetwork(current.id);
     }
 
     let branch: Tenant;
@@ -591,7 +594,7 @@ export class NetworkService {
     return { rootId, byId, children };
   }
 
-  private ancestorIds(tree: Tree, id: string): string[] {
+  ancestorIds(tree: Tree, id: string): string[] {
     const out: string[] = [];
     let at = tree.byId.get(id)?.parentTenantId;
     while (at && tree.byId.has(at) && !out.includes(at)) {

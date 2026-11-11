@@ -48,6 +48,7 @@ import { OrderBy } from '../types/order-by.type';
 import { Order } from '../types/order.type';
 import { EventSeriesService } from './event-series.service';
 import { ServiceProgrammeService } from '../../service-programme/service/service-programme.service';
+import { NetworkShareService } from '../../network-share/network-share.service';
 
 const SLOT_RELATIONS = [
   'audienceGroup',
@@ -103,6 +104,7 @@ export class EventService {
   private readonly logger = new Logger(EventService.name);
 
   constructor(
+    private readonly networkShare: NetworkShareService,
     private readonly dataSource: DataSource,
     private readonly eventConfigService: EventConfigService,
     private readonly venueService: VenueService,
@@ -129,6 +131,7 @@ export class EventService {
     actorId: string,
   ): Promise<ScheduledEvent | ScheduledEvent[]> {
     dto = { ...dto, ...(await this.resolveAudience(dto)) };
+    if (dto.sendToBranches) await this.networkShare.assertCanShare();
     if (dto.isRecurring) {
       if (!dto.recurrence)
         throw new BadRequestException(
@@ -214,6 +217,10 @@ export class EventService {
 
     if (dto.onlineAttendanceEnabled !== undefined)
       event.onlineAttendanceEnabled = dto.onlineAttendanceEnabled;
+    if (dto.sendToBranches !== undefined) {
+      if (dto.sendToBranches) await this.networkShare.assertCanShare();
+      event.sendToBranches = dto.sendToBranches;
+    }
 
     if (dto.audience !== undefined) {
       // Opening an event to everyone can clash with what's already at that time.
@@ -766,6 +773,7 @@ export class EventService {
       startTime,
       endTime,
       onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
+      sendToBranches: dto.sendToBranches ?? false,
       audience: dto.audience ?? EventAudienceEnum.EVERYONE,
       audienceGroupId: dto.audienceGroupId ?? null,
     });
@@ -842,6 +850,7 @@ export class EventService {
       Partial<
         Pick<
           Event,
+          | 'sendToBranches'
           | 'description'
           | 'recurringEventId'
           | 'seriesOccurrenceDate'

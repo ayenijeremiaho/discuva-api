@@ -54,6 +54,11 @@ export class UpdateEventSeriesDto {
   @IsBoolean()
   onlineAttendanceEnabled?: boolean;
 
+  // Shown to every branch under this church; only for a church with branches.
+  @IsOptional()
+  @IsBoolean()
+  sendToBranches?: boolean;
+
   @IsOptional()
   @IsBoolean()
   autoProgramme?: boolean;
@@ -125,6 +130,11 @@ export class UpsertEventTemplateDto {
   @IsOptional()
   @IsBoolean()
   onlineAttendanceEnabled?: boolean;
+
+  // Shown to every branch under this church; only for a church with branches.
+  @IsOptional()
+  @IsBoolean()
+  sendToBranches?: boolean;
 
   @IsArray()
   @ArrayMinSize(1)

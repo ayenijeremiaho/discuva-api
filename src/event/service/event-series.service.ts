@@ -33,6 +33,7 @@ import {
   OverlapDetail,
   PreviewDate,
 } from '../types/event-preview';
+import { NetworkShareService } from '../../network-share/network-share.service';
 import {
   SlotBlueprint,
   addDays,
@@ -97,6 +98,7 @@ export class EventSeriesService {
   private readonly logger = new Logger(EventSeriesService.name);
 
   constructor(
+    private readonly networkShare: NetworkShareService,
     @InjectRepository(EventSeries)
     private readonly seriesRepo: Repository<EventSeries>,
     @InjectRepository(Event)
@@ -159,6 +161,7 @@ export class EventSeriesService {
       name: dto.name,
       description: dto.description ?? null,
       onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
+      sendToBranches: dto.sendToBranches ?? false,
       recurrencePattern: recurrence.recurrencePattern,
       recurrenceInterval: recurrence.recurrenceInterval,
       startDate: date,
@@ -612,6 +615,7 @@ export class EventSeriesService {
         name: series.name,
         description: series.description ?? undefined,
         onlineAttendanceEnabled: series.onlineAttendanceEnabled,
+        sendToBranches: series.sendToBranches,
         recurringEventId: series.id,
         seriesOccurrenceDate: date,
         audience: series.audience,
@@ -677,6 +681,10 @@ export class EventSeriesService {
     if (dto.description !== undefined) series.description = dto.description;
     if (dto.onlineAttendanceEnabled !== undefined)
       series.onlineAttendanceEnabled = dto.onlineAttendanceEnabled;
+    if (dto.sendToBranches !== undefined) {
+      if (dto.sendToBranches) await this.networkShare.assertCanShare();
+      series.sendToBranches = dto.sendToBranches;
+    }
     if (dto.autoProgramme !== undefined)
       series.autoProgramme = dto.autoProgramme;
     if (dto.audience !== undefined) {
@@ -734,6 +742,7 @@ export class EventSeriesService {
       occ.name = series.name;
       occ.description = series.description ?? occ.description;
       occ.onlineAttendanceEnabled = series.onlineAttendanceEnabled;
+      occ.sendToBranches = series.sendToBranches;
       const clash = clashing.get(occ.seriesOccurrenceDate!);
       if (clash) {
         await this.eventRepo.save(occ);

@@ -30,6 +30,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { GroupService } from '../../group/service/group.service';
 import { ClassesService } from '../../classes/service/classes.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { NetworkShareService } from '../../network-share/network-share.service';
 import { SmsService } from '../../sms/service/sms.service';
 
 export interface AnnouncementSmsDispatchResult {
@@ -60,6 +61,12 @@ function pushText(html: string): string {
     .trim();
 }
 
+// Departments, groups, classes and people belong to one church, so only these audiences mean the same at every branch.
+const SHAREABLE_AUDIENCES = new Set([
+  AnnouncementAudienceEnum.ALL,
+  AnnouncementAudienceEnum.MEMBERS_ONLY,
+  AnnouncementAudienceEnum.WORKERS_ONLY,
+]);
 @Injectable()
 export class AnnouncementService {
   constructor(
@@ -74,6 +81,7 @@ export class AnnouncementService {
     private readonly groupService: GroupService,
     private readonly classesService: ClassesService,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly networkShare: NetworkShareService,
     private readonly smsService: SmsService,
   ) {}
 
@@ -112,6 +120,11 @@ export class AnnouncementService {
   ): Promise<Announcement & { smsDispatch?: AnnouncementSmsDispatchResult }> {
     this.assertAudienceTargetProvided(dto);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
+    if (dto.sendToBranches) {
+      await this.assertCanSendToBranches(
+        dto.audience ?? AnnouncementAudienceEnum.ALL,
+      );
+    }
 
     const announcement = this.announcementRepo.create({
       title: dto.title,
@@ -126,9 +139,12 @@ export class AnnouncementService {
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       sendViaSms: dto.sendViaSms ?? false,
       smsBody: dto.sendViaSms ? dto.smsBody : null,
+      sendToBranches: dto.sendToBranches ?? false,
     });
 
     const saved = await this.announcementRepo.save(announcement);
+    if (saved.sendToBranches)
+      await this.networkShare.announcementChanged(saved.id);
     this.logger.log(
       `Announcement "${saved.title}" published to ${saved.audience} audience (id: ${saved.id}) by actor ${authorId}`,
     );
@@ -284,7 +300,9 @@ export class AnnouncementService {
     admin: Admin,
   ): Promise<Announcement & { smsDispatch?: AnnouncementSmsDispatchResult }> {
     const announcement = await this.getOrThrow(id);
+    this.assertNotNetworkCopy(announcement);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
+    const wasShared = announcement.sendToBranches;
 
     const sendingSmsNow = dto.sendViaSms === true && !announcement.sendViaSms;
 
@@ -306,8 +324,16 @@ export class AnnouncementService {
       announcement.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     if (dto.sendViaSms !== undefined) announcement.sendViaSms = dto.sendViaSms;
     if (dto.smsBody !== undefined) announcement.smsBody = dto.smsBody;
+    if (dto.sendToBranches !== undefined)
+      announcement.sendToBranches = dto.sendToBranches;
+    if (announcement.sendToBranches) {
+      await this.assertCanSendToBranches(announcement.audience);
+    }
 
     const saved = await this.announcementRepo.save(announcement);
+    if (wasShared || saved.sendToBranches) {
+      await this.networkShare.announcementChanged(saved.id);
+    }
     this.auditLogService.log('ANNOUNCEMENT_UPDATED', {
       actorId,
       targetId: id,
@@ -550,15 +576,129 @@ export class AnnouncementService {
 
   async delete(id: string, actorId: string): Promise<void> {
     const announcement = await this.getOrThrow(id);
+    this.assertNotNetworkCopy(announcement);
     // Capture title before removal — record is gone after this line
-    const { title, audience } = announcement;
+    const { title, audience, sendToBranches } = announcement;
     await this.announcementRepo.remove(announcement);
+    if (sendToBranches) await this.networkShare.announcementChanged(id);
     this.auditLogService.log('ANNOUNCEMENT_DELETED', {
       actorId,
       targetId: id,
       targetName: title,
       metadata: { title, audience },
     });
+  }
+
+  // A branch's copy of a network announcement: hidden from its members or shown again, never edited here.
+  async setNetworkHidden(
+    id: string,
+    hidden: boolean,
+    actorId: string,
+  ): Promise<Announcement> {
+    const announcement = await this.getOrThrow(id);
+    if (!announcement.networkSourceId) {
+      throw new BadRequestException(
+        'Only announcements from the network can be hidden.',
+      );
+    }
+    announcement.networkHidden = hidden;
+    const saved = await this.announcementRepo.save(announcement);
+    this.auditLogService.log('ANNOUNCEMENT_UPDATED', {
+      actorId,
+      targetId: id,
+      targetName: saved.title,
+      metadata: { title: saved.title, networkHidden: hidden },
+    });
+    return saved;
+  }
+
+  // Runs in the branch's own context, so its members are reached through its own audience rules and push list.
+  async upsertNetworkCopy(
+    source: Pick<
+      Announcement,
+      'id' | 'title' | 'body' | 'audience' | 'publishedAt' | 'expiresAt'
+    >,
+    sourceTenantId: string,
+    from: string,
+  ): Promise<void> {
+    const existing = await this.announcementRepo.findOne({
+      where: {
+        networkSourceTenantId: sourceTenantId,
+        networkSourceId: source.id,
+      },
+    });
+    const fields = {
+      title: source.title,
+      body: source.body,
+      audience: source.audience,
+      publishedAt: source.publishedAt,
+      expiresAt: source.expiresAt,
+      networkFrom: from,
+    };
+    if (existing) {
+      await this.announcementRepo.update(existing.id, fields);
+      return;
+    }
+    // Insert-unless-there: a second run of the same job (a retry overlapping the first) only updates, and never pushes twice.
+    const inserted = await this.announcementRepo
+      .createQueryBuilder()
+      .insert()
+      .values({
+        ...fields,
+        networkSourceId: source.id,
+        networkSourceTenantId: sourceTenantId,
+      })
+      .orIgnore()
+      .returning(['id'])
+      .execute();
+    const newId = (inserted.raw as { id: string }[])[0]?.id;
+    if (!newId) {
+      await this.announcementRepo.update(
+        { networkSourceTenantId: sourceTenantId, networkSourceId: source.id },
+        fields,
+      );
+      return;
+    }
+    const saved = { ...fields, id: newId } as Announcement;
+    // Awaited: the member lookup needs this branch's schema, which the job leaves when it moves on.
+    const memberIds = await this.resolveMemberIdsForAudience({
+      audience: saved.audience,
+    });
+    await this.pushNotificationService.dispatchToMemberIds(memberIds, {
+      idempotencyKey: saved.id,
+      title: saved.title,
+      body: pushText(saved.body).slice(0, 150),
+      url: `/announcements/${saved.id}`,
+    });
+  }
+
+  async removeNetworkCopy(
+    sourceId: string,
+    sourceTenantId: string,
+  ): Promise<void> {
+    await this.announcementRepo.delete({
+      networkSourceId: sourceId,
+      networkSourceTenantId: sourceTenantId,
+    });
+  }
+
+  private assertNotNetworkCopy(announcement: Announcement): void {
+    if (announcement.networkSourceId) {
+      throw new ForbiddenException(
+        `This came from ${announcement.networkFrom ?? 'your network'}. You can hide it here, but only they can change it.`,
+      );
+    }
+  }
+
+  private async assertCanSendToBranches(
+    audience: AnnouncementAudienceEnum,
+  ): Promise<void> {
+    if (!SHAREABLE_AUDIENCES.has(audience)) {
+      throw new BadRequestException(
+        'Only announcements for everyone, all members or all workers can go to branches.',
+      );
+    }
+    await this.networkShare.assertCanShare();
   }
 
   async getById(id: string): Promise<Announcement> {
@@ -587,6 +727,7 @@ export class AnnouncementService {
       .leftJoinAndSelect('a.churchClass', 'cls')
       .where('(a.publishedAt IS NULL OR a.publishedAt <= :now)', { now })
       .andWhere('(a.expiresAt IS NULL OR a.expiresAt > :now)', { now })
+      .andWhere('a.networkHidden = false')
       .orderBy('a.publishedAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);

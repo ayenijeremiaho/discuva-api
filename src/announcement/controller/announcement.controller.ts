@@ -16,6 +16,7 @@ import {
   UpdateAnnouncementDto,
 } from '../dto/create-announcement.dto';
 import { SendSmsBroadcastDto } from '../dto/send-sms-broadcast.dto';
+import { NetworkHiddenDto } from '../dto/network-hidden.dto';
 import { ReactToAnnouncementDto } from '../dto/react-to-announcement.dto';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -66,6 +67,18 @@ export class AnnouncementController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.announcementService.update(id, dto, user.id, admin);
+  }
+
+  // A branch's copy of a network announcement: hide it from members here, or show it again.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ANNOUNCEMENTS_WRITE)
+  @Patch(':id/network-hidden')
+  setNetworkHidden(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: NetworkHiddenDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.announcementService.setNetworkHidden(id, dto.hidden, user.id);
   }
 
   @UseGuards(AdminGuard)

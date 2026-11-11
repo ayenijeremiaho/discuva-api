@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsISO8601,
   IsLatitude,
   IsLongitude,
   IsNumber,
@@ -110,4 +111,21 @@ export class VisitCheckInDto {
   @IsString()
   @Matches(/^[A-Za-z0-9]{6}$/)
   code?: string;
+}
+
+export class DateWindowDto {
+  @IsISO8601()
+  from: string;
+
+  @IsISO8601()
+  to: string;
+
+  @IsOptional()
+  @IsUUID()
+  churchId?: string;
+}
+
+export class HiddenDto {
+  @IsBoolean()
+  hidden: boolean;
 }

@@ -20,6 +20,13 @@ import { PushNotificationService } from '../../push-notification/service/push-no
 import { SmsService } from '../../sms/service/sms.service';
 import { Member } from '../../member/entity/member.entity';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { NetworkShareService } from '../../network-share/network-share.service';
+
+const mockNetworkShare = {
+  assertCanShare: jest.fn().mockResolvedValue(undefined),
+  announcementChanged: jest.fn().mockResolvedValue(undefined),
+  eventsChanged: jest.fn().mockResolvedValue(undefined),
+};
 
 const noSmsAdmin = { id: 'admin-1', adminRole: { permissions: [] } } as any;
 const smsAdmin = {
@@ -118,6 +125,7 @@ describe('AnnouncementService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: NetworkShareService, useValue: mockNetworkShare },
         AnnouncementService,
         {
           provide: getRepositoryToken(Announcement),
@@ -1132,6 +1140,132 @@ describe('AnnouncementService', () => {
       const result = await service.getReactionSummary('ann-1', 'member-1');
 
       expect(result.myReaction).toBe(ReactionEmojiEnum.CLAP);
+    });
+  });
+
+  describe('sending to branches', () => {
+    const shared = {
+      id: 'ann-net',
+      title: 'Convention',
+      body: '<p>All branches</p>',
+      audience: AnnouncementAudienceEnum.ALL,
+      publishedAt: new Date(),
+      expiresAt: null,
+      sendToBranches: true,
+      networkSourceId: null,
+    };
+
+    it('queues copies for the branches when sent to them', async () => {
+      mockAnnouncementRepo.create.mockReturnValue(shared);
+      mockAnnouncementRepo.save.mockResolvedValue(shared);
+      await service.create(
+        { title: 'Convention', body: 'x', sendToBranches: true } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+      expect(mockNetworkShare.assertCanShare).toHaveBeenCalled();
+      expect(mockNetworkShare.announcementChanged).toHaveBeenCalledWith(
+        'ann-net',
+      );
+    });
+
+    it('refuses audiences that only exist at one church', async () => {
+      await expect(
+        service.create(
+          {
+            title: 'Choir',
+            body: 'x',
+            audience: AnnouncementAudienceEnum.DEPARTMENT,
+            departmentId: 'd1',
+            sendToBranches: true,
+          } as any,
+          'author-1',
+          noSmsAdmin,
+        ),
+      ).rejects.toThrow(/everyone, all members or all workers/);
+      expect(mockNetworkShare.announcementChanged).not.toHaveBeenCalled();
+    });
+
+    it('removes the copies when the original is deleted', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue({ ...shared });
+      await service.delete('ann-net', 'author-1');
+      expect(mockNetworkShare.announcementChanged).toHaveBeenCalledWith(
+        'ann-net',
+      );
+    });
+
+    it("won't let a branch edit or delete a copy, only hide it", async () => {
+      const copy = {
+        ...shared,
+        id: 'copy-1',
+        sendToBranches: false,
+        networkSourceId: 'ann-net',
+        networkFrom: 'ABC',
+        networkHidden: false,
+      };
+      mockAnnouncementRepo.findOne.mockResolvedValue({ ...copy });
+      await expect(
+        service.update('copy-1', { title: 'Mine now' } as any, 'a', noSmsAdmin),
+      ).rejects.toThrow(/came from ABC/);
+      await expect(service.delete('copy-1', 'a')).rejects.toThrow(
+        /came from ABC/,
+      );
+      mockAnnouncementRepo.save.mockImplementation(async (a: unknown) => a);
+      const hidden = await service.setNetworkHidden('copy-1', true, 'a');
+      expect(hidden.networkHidden).toBe(true);
+    });
+
+    it("a branch copy is created once with its members' push; a repeat only updates", async () => {
+      const insertQb: any = {
+        insert: () => insertQb,
+        values: jest.fn(() => insertQb),
+        orIgnore: () => insertQb,
+        returning: () => insertQb,
+        execute: jest.fn().mockResolvedValue({ raw: [{ id: 'copy-1' }] }),
+      };
+      mockAnnouncementRepo.createQueryBuilder.mockReturnValue(insertQb);
+      mockAnnouncementRepo.findOne.mockResolvedValueOnce(null);
+      await service.upsertNetworkCopy(shared as any, 'root', 'ABC');
+      expect(insertQb.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          networkSourceId: 'ann-net',
+          networkSourceTenantId: 'root',
+          networkFrom: 'ABC',
+        }),
+      );
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          idempotencyKey: 'copy-1',
+          url: '/announcements/copy-1',
+        }),
+      );
+
+      mockPushNotificationService.dispatchToMemberIds.mockClear();
+      mockAnnouncementRepo.findOne.mockResolvedValueOnce({ id: 'copy-1' });
+      await service.upsertNetworkCopy(
+        { ...shared, title: 'Convention (moved)' } as any,
+        'root',
+        'ABC',
+      );
+      expect(mockAnnouncementRepo.update).toHaveBeenCalledWith(
+        'copy-1',
+        expect.objectContaining({ title: 'Convention (moved)' }),
+      );
+
+      // Two runs racing: the second finds nothing, its insert is ignored, and it updates instead of pushing.
+      mockAnnouncementRepo.findOne.mockResolvedValueOnce(null);
+      insertQb.execute.mockResolvedValueOnce({ raw: [] });
+      await service.upsertNetworkCopy(shared as any, 'root', 'ABC');
+      expect(mockAnnouncementRepo.update).toHaveBeenLastCalledWith(
+        { networkSourceTenantId: 'root', networkSourceId: 'ann-net' },
+        expect.anything(),
+      );
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).not.toHaveBeenCalled();
     });
   });
 });
