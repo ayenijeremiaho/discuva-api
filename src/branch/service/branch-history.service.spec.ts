@@ -11,18 +11,24 @@ jest.mock('../../tenant/utility/run-in-tenant-context', () => ({
 }));
 
 const HERE = 'ikeja';
-const move = (from: string, at: string, fromMemberId = `old-${from}`) => ({
+const move = (
+  from: string,
+  at: string,
+  to = 'elsewhere',
+  fromMemberId = `old-${from}`,
+) => ({
   networkRootId: 'root',
   fromTenantId: from,
+  toTenantId: to,
   fromMemberId,
   decidedAt: new Date(at),
 });
 
 function setup(
   moves = [
-    move('lekki', '2026-11-09'),
-    move(HERE, '2026-06-01'),
-    move('lekki', '2025-01-01'),
+    move('lekki', '2026-11-09', HERE),
+    move(HERE, '2026-06-01', 'lekki'),
+    move('lekki', '2025-01-01', HERE),
   ],
 ) {
   const transferRepo = { find: jest.fn().mockResolvedValue(moves) };
@@ -114,7 +120,10 @@ describe('BranchHistoryService', () => {
         { year: 2025, count: 48 },
       ],
     });
-    expect(h.joinedOn).toBe('2019-03-01');
+    expect(h.stays).toEqual([
+      { from: '2026-06-01', to: '2026-11-09' },
+      { from: '2019-03-01', to: '2025-01-01' },
+    ]);
     expect(t.dataSource.query.mock.calls[0][0]).toContain(
       '"church_lekki".attendances',
     );
@@ -123,7 +132,7 @@ describe('BranchHistoryService', () => {
       2026,
     );
     expect(t.cache.setGlobal).toHaveBeenCalledWith(
-      'branch-history:old-lekki:2026',
+      `branch-history:old-lekki:${new Date('2026-11-09').getTime()}:2026`,
       h,
       86400,
     );

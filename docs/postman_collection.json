@@ -42597,7 +42597,7 @@
               "name": "200",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"path\": \"ABC · Lekki\",\n  \"currency\": \"NGN\",\n  \"joinedOn\": \"2019-03-01\",\n  \"movedAt\": \"2026-11-09T10:00:00.000Z\",\n  \"attendance\": {\n    \"total\": 78,\n    \"last\": \"2026-11-02T09:00:00.000Z\",\n    \"byYear\": [\n      {\n        \"year\": 2026,\n        \"count\": 30\n      }\n    ]\n  },\n  \"giving\": {\n    \"year\": 2026,\n    \"years\": [\n      2026,\n      2025\n    ],\n    \"total\": 50000,\n    \"count\": 4,\n    \"byType\": [\n      {\n        \"type\": \"Tithe\",\n        \"total\": 40000,\n        \"count\": 3\n      }\n    ]\n  }\n}"
+              "body": "{\n  \"path\": \"ABC · Lekki\",\n  \"currency\": \"NGN\",\n  \"stays\": [\n    {\n      \"from\": \"2026-06-01\",\n      \"to\": \"2026-11-09\"\n    },\n    {\n      \"from\": \"2019-03-01\",\n      \"to\": \"2025-01-01\"\n    }\n  ],\n  \"movedAt\": \"2026-11-09T10:00:00.000Z\",\n  \"attendance\": {\n    \"total\": 78,\n    \"last\": \"2026-11-02T09:00:00.000Z\",\n    \"byYear\": [\n      {\n        \"year\": 2026,\n        \"count\": 30\n      }\n    ]\n  },\n  \"giving\": {\n    \"year\": 2026,\n    \"years\": [\n      2026,\n      2025\n    ],\n    \"total\": 50000,\n    \"count\": 4,\n    \"byType\": [\n      {\n        \"type\": \"Tithe\",\n        \"total\": 40000,\n        \"count\": 3\n      }\n    ]\n  }\n}"
             }
           ]
         },

@@ -32,7 +32,8 @@ export interface PastBranch {
 export interface BranchHistory {
   path: string;
   currency: string;
-  joinedOn: string | null;
+  // Each stay at that branch, newest first; `from` is null when the start isn't known.
+  stays: { from: string | null; to: string }[];
   movedAt: Date;
   attendance: {
     total: number;
@@ -62,7 +63,7 @@ export class BranchHistoryService {
   async list(memberId: string): Promise<PastBranch[]> {
     const accountId = await this.accountOf(memberId);
     if (!accountId) return [];
-    const moves = await this.latestMovesFrom(accountId);
+    const moves = this.latestPerBranch(await this.doneMoves(accountId));
     if (!moves.length) return [];
     const paths = await this.network.pathsOf(
       moves[0].networkRootId,
@@ -82,9 +83,9 @@ export class BranchHistoryService {
     tenantId: string,
     year?: number,
   ): Promise<BranchHistory> {
-    const { move, church } = await this.pastRecord(memberId, tenantId);
+    const { move, church, done } = await this.pastRecord(memberId, tenantId);
     const givingYear = year ?? new Date().getFullYear();
-    const key = `branch-history:${move.fromMemberId}:${givingYear}`;
+    const key = `branch-history:${move.fromMemberId}:${move.decidedAt!.getTime()}:${givingYear}`;
     const cached = await this.cache.getGlobal<BranchHistory>(key);
     if (cached) return cached;
 
@@ -104,9 +105,7 @@ export class BranchHistoryService {
       return {
         path: paths.get(tenantId) ?? '',
         currency: church.currency,
-        joinedOn: old.dateJoinedChurch
-          ? new Date(old.dateJoinedChurch).toISOString().slice(0, 10)
-          : null,
+        stays: this.staysAt(tenantId, done, old.dateJoinedChurch),
         movedAt: old.transferredAt ?? move.decidedAt!,
         attendance,
         giving,
@@ -135,11 +134,10 @@ export class BranchHistoryService {
 
   private async pastRecord(memberId: string, tenantId: string) {
     const accountId = await this.accountOf(memberId);
-    const move = accountId
-      ? (await this.latestMovesFrom(accountId)).find(
-          (m) => m.fromTenantId === tenantId,
-        )
-      : undefined;
+    const done = accountId ? await this.doneMoves(accountId) : [];
+    const move = this.latestPerBranch(done).find(
+      (m) => m.fromTenantId === tenantId,
+    );
     const church = move
       ? await this.tenantRepo.findOne({
           where: { id: tenantId, isActive: true },
@@ -148,16 +146,43 @@ export class BranchHistoryService {
       : null;
     if (!move || !church)
       throw new NotFoundException('No history at that branch.');
-    return { move, church };
+    return { move, church, done };
   }
 
-  // The latest completed move out of each branch, leaving out the one they're in now.
-  private async latestMovesFrom(accountId: string): Promise<NetworkTransfer[]> {
-    const done = await this.transferRepo.find({
+  // Newest first. Fifty covers years of moving; older moves only drop out of the stay dates.
+  private doneMoves(accountId: string): Promise<NetworkTransfer[]> {
+    return this.transferRepo.find({
       where: { accountId, status: NetworkTransferStatus.DONE },
       order: { decidedAt: 'DESC' },
       take: 50,
     });
+  }
+
+  // Each stay ends at a move out; it starts at the move in before it, or at joining the church.
+  private staysAt(
+    tenantId: string,
+    done: NetworkTransfer[],
+    joined: Date | null,
+  ): { from: string | null; to: string }[] {
+    const day = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+    const oldestFirst = [...done].reverse();
+    const stays: { from: string | null; to: string }[] = [];
+    let arrived: Date | null = null;
+    let seenAny = false;
+    for (const m of oldestFirst) {
+      if (m.toTenantId === tenantId) arrived = m.decidedAt;
+      if (m.fromTenantId === tenantId) {
+        const start = arrived ?? (seenAny ? null : joined);
+        stays.push({ from: start ? day(start) : null, to: day(m.decidedAt!) });
+        arrived = null;
+      }
+      seenAny = true;
+    }
+    return stays.reverse();
+  }
+
+  // The latest completed move out of each branch, leaving out the one they're in now.
+  private latestPerBranch(done: NetworkTransfer[]): NetworkTransfer[] {
     const here = this.cls.get('tenantId');
     const seen = new Set<string>();
     return done.filter((m) => {
