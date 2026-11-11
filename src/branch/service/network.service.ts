@@ -26,6 +26,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { NetworkLevel } from '../entity/network-level.entity';
 import { NetworkMove } from '../entity/network-move.entity';
+import { NetworkVenueService } from '../../venue/service/network-venue.service';
 import { TenantRollup } from '../entity/tenant-rollup.entity';
 import { AddBranchDto } from '../dto/network.dto';
 
@@ -129,6 +130,7 @@ export class NetworkService {
     private readonly auditLog: AuditLogService,
     private readonly cache: CacheService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly networkVenues: NetworkVenueService,
   ) {}
 
   isAvailable(): Promise<boolean> {
@@ -252,6 +254,7 @@ export class NetworkService {
 
     if (!current.networkRootId) {
       await this.tenantRepo.update(current.id, { networkRootId: current.id });
+      await this.networkVenues.syncCurrent(current.id);
     }
 
     let branch: Tenant;

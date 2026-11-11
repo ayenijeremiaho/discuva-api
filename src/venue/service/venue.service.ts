@@ -12,6 +12,7 @@ import { CreateVenueDto, UpdateVenueDto } from '../dto/create-venue.dto';
 import { ConfigService } from '@nestjs/config';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { NetworkVenueService } from './network-venue.service';
 
 @Injectable()
 export class VenueService {
@@ -24,6 +25,7 @@ export class VenueService {
     private readonly repo: Repository<Venue>,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
+    private readonly networkVenues: NetworkVenueService,
   ) {
     this.cacheTtl = this.configService.get<number>(
       'CACHE_TTL_REFERENCE_SECONDS',
@@ -36,6 +38,7 @@ export class VenueService {
     }
     const saved = await this.repo.save(this.repo.create(dto));
     this.cacheService.del(VenueService.CACHE_KEY);
+    await this.networkVenues.syncCurrent();
     this.logger.log(`Venue created: "${saved.name}" (${saved.id})`);
     return saved;
   }
@@ -92,6 +95,7 @@ export class VenueService {
 
     const saved = await this.repo.save(venue);
     this.cacheService.del(VenueService.CACHE_KEY);
+    await this.networkVenues.syncCurrent();
     this.logger.log(`Venue updated: "${saved.name}" (${id})`);
     return saved;
   }
@@ -101,6 +105,7 @@ export class VenueService {
     try {
       await this.repo.remove(venue);
       this.cacheService.del(VenueService.CACHE_KEY);
+      await this.networkVenues.syncCurrent();
       this.logger.log(`Venue deleted: "${venue.name}" (${id})`);
     } catch {
       throw new BadRequestException(

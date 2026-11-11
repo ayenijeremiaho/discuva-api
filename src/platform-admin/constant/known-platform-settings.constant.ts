@@ -192,6 +192,20 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 0,
     max: 2,
   },
+  [PlatformSettingKey.NETWORK_VISIT_SUGGEST_VISITS]: {
+    label: 'Visits Before Suggesting a Move',
+    unit: 'visits to the same branch within the weeks below; 0 = never suggest',
+    defaultValue: 4,
+    min: 0,
+    max: 20,
+  },
+  [PlatformSettingKey.NETWORK_VISIT_SUGGEST_WEEKS]: {
+    label: 'Weeks Counted for a Move Suggestion',
+    unit: 'weeks',
+    defaultValue: 8,
+    min: 2,
+    max: 26,
+  },
   [PlatformSettingKey.NETWORK_MAX_LEVELS]: {
     label: 'Levels in a Church Network',
     unit: 'levels, counting the top church',

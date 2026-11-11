@@ -10,7 +10,13 @@ import { NetworkTransferService } from './service/network-transfer.service';
 import { NetworkTransferController } from './controller/network-transfer.controller';
 import { BranchHistoryController } from './controller/branch-history.controller';
 import { BranchHistoryService } from './service/branch-history.service';
+import { NetworkVisitService } from './service/network-visit.service';
+import { NetworkVisitController } from './controller/network-visit.controller';
+import { NetworkVisitCode } from './entity/network-visit-code.entity';
+import { NetworkVisitor } from './entity/network-visitor.entity';
 import { TitheModule } from '../tithe/tithe.module';
+import { VenueModule } from '../venue/venue.module';
+import { AttendanceModule } from '../attendance/attendance.module';
 import { Admin } from '../admin/entity/admin.entity';
 import { MemberModule } from '../member/member.module';
 import { AuthModule } from '../auth/auth.module';
@@ -35,6 +41,7 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
       NetworkLevel,
       NetworkMove,
       NetworkTransfer,
+      NetworkVisitCode,
       TenantRollup,
       Subscription,
     ]),
@@ -42,11 +49,19 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     // BranchRollupService's manually-entered tenant context, the same
     // reason every other module owning tenant-schema tables uses this
     // instead of plain TypeOrmModule.forFeature (docs/MULTI_TENANT_MIGRATION.md §4.4).
-    TenantTypeOrmModule.forFeature([Member, Attendance, TitheRecord, Admin]),
+    TenantTypeOrmModule.forFeature([
+      Member,
+      Attendance,
+      TitheRecord,
+      Admin,
+      NetworkVisitor,
+    ]),
     TenantModule,
     MemberModule,
     AuthModule,
     TitheModule,
+    VenueModule,
+    AttendanceModule,
   ],
   controllers: [
     BranchController,
@@ -55,12 +70,14 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     PlatformNetworkController,
     NetworkTransferController,
     BranchHistoryController,
+    NetworkVisitController,
   ],
   providers: [
     BranchRollupService,
     NetworkService,
     NetworkTransferService,
     BranchHistoryService,
+    NetworkVisitService,
     BranchRollupScheduler,
   ],
   exports: [NetworkService],

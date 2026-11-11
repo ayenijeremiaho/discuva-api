@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { VenueService } from './venue.service';
+import { NetworkVenueService } from './network-venue.service';
 import { Venue } from '../entity/venue.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { ConfigService } from '@nestjs/config';
@@ -44,6 +45,8 @@ const annexHall: Venue = {
   longitude: 3.4,
 } as Venue;
 
+const mockNetworkVenues = { syncCurrent: jest.fn() };
+
 describe('VenueService', () => {
   let service: VenueService;
 
@@ -57,6 +60,7 @@ describe('VenueService', () => {
         { provide: getRepositoryToken(Venue), useValue: mockRepo },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: NetworkVenueService, useValue: mockNetworkVenues },
       ],
     }).compile();
 
@@ -81,6 +85,7 @@ describe('VenueService', () => {
         where: { name: dto.name },
       });
       expect(mockCacheService.del).toHaveBeenCalledWith('venues:all');
+      expect(mockNetworkVenues.syncCurrent).toHaveBeenCalled();
       expect(result).toEqual(mainAuditorium);
     });
 

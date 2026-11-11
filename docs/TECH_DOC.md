@@ -2698,6 +2698,27 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Index:** `idx_network_transfers_done_account (account_id, decided_at DESC) WHERE status = 'DONE'` (migration `1806950400000-AddNetworkTransfersDoneIndex`). My Account makes this one indexed read per visit, for people in a network with a Discuva account.
 - **Database cost:** nothing scheduled and nothing copied. Opening a past branch costs one indexed read of the move log and about three indexed reads in the old branch, then nothing more for a day.
 
+**Visiting another branch (visitor check-in):** a member with a Discuva account checks in at another branch of their network as a visitor. The host records a visitor, and the home branch records "attended at another branch". `NetworkVisitService`, `src/branch/service/network-visit.service.ts`.
+- **Finding where someone is:** root table `network_venues (tenant_id, venue_id) → network_root_id, name, latitude, longitude` (index `idx_network_venues_root`) is a copy of each networked church's venues (already public). `NetworkVenueService.syncCurrent` re-copies the current church's venues whole whenever `VenueService` creates, updates or deletes one, and when a church adds its first branch. A network's list is cached globally for an hour under `network-venues:<rootId>`, cleared on every sync. The migration copies venues for churches already in a network.
+- **Endpoints (member app, `JwtAuthGuard`, member sessions only):**
+  - `GET /network/visit/nearby?latitude=&longitude=&accuracy=` (20/min) returns `{ visit: { tenantId, path, venueName, slots: [{ id, name, startTime, endTime }] } | null }`. It looks for the nearest venue of another branch within 300 m (the reading's accuracy counts up to 300 m more), never the member's own branch, and lists that venue's services open to visitors now.
+  - `GET /network/visit/code/:code` (10/min) returns the same place for a venue code, with any of that branch's open services.
+  - `POST /network/visit/check-in { tenantId, serviceSlotId, location? | code? }` returns `{ message, path, suggestMove }`.
+- **Which services take visitors:** in person, open to everyone (event and service), with check-in open by the member window (`AttendanceService.openVisitorSlots`, which reads services starting within 12 hours of now; the `service_slots.start_time` index).
+- **Proof of presence:** the location must be within the service's own `allowedDistanceInMeters` of its venue, with the same accuracy credit members get (`AttendanceService.assertVisitorCanCheckIn`), or the branch's venue code must match. Distance is checked for visitors even when the host has its distance switch off, because the location is the proof.
+- **Rules:** the switch must be on; the member must be active at home with a Discuva account; the host must be another active church in the same network. One check-in per person per service day at the host (409 `ALREADY_CHECKED_IN`).
+- **Host side:** tenant table `network_visitors` (`event_id`, `service_slot_id`, `account_id`, `from_tenant_id`, `firstname`, `lastname`, `photo_url`, `checkin_time`; unique `(event_id, account_id)`; index `(account_id, checkin_time)` for the suggestion count). Name and photo only; no member record is created and the host's headcount is untouched. Admin: `GET /network/visit/visitors/:eventId` (ATTENDANCE_READ) returns `[{ id, name, photoUrl, fromPath, serviceName, checkinTime }]`.
+- **Home side:** `AttendanceService.recordAttendedElsewhere` writes status `ATTENDED_ELSEWHERE` with `attendances.attended_at_tenant_id` for each of the home branch's service days on that local date (home time zone) that the person is in the audience for. It replaces an `ABSENT` row and leaves any other row alone. Absence marking skips them (`getMembersNotCheckedInForEvent` / `getWorkersNotCheckedInForEvent` treat it like present), and the at-risk list's "last seen" counts it. It is not in headcounts, streaks or "genuinely attended" counts. Checking in at home later the same day replaces it as usual.
+- **Venue codes:** root table `network_visit_codes (tenant_id PK, code UNIQUE)`, 6 characters with no look-alikes (no 0/O, 1/I/L), made on first ask. `GET /network/visit/code` (ATTENDANCE_WRITE) returns `{ code, path, appSubdomain }`; the admin poster's QR opens `<network app>/visit?code=<code>`. `POST /network/visit/code/regenerate` replaces it, and the old code stops working (audit `NETWORK_VISIT_CODE_CHANGED`).
+- **Move suggestion:** platform settings `network_visit_suggest_visits` (default 4, 0 = never) and `network_visit_suggest_weeks` (default 8). When the person's visits to that branch in the window reach the number, `suggestMove` is true and the app offers "make it your home branch?". A per-network override comes with network settings.
+- **Audit:** `NETWORK_VISIT_CHECKIN`.
+- **Migrations:** root `1807036800000-AddNetworkVenuesAndVisitCodes`; tenant `1806048000000-AddNetworkVisitors`.
+- **Database cost:**
+  - Nothing scheduled.
+  - The home screen asks `nearby` only when location is already allowed, at most every 30 minutes a session, from a cached list. It reads inside the host only when someone is within 300 m of its venue.
+  - A check-in is a handful of indexed writes: one host row, the home attendance rows, and one count.
+  - Venue copies are written only when a venue changes.
+
 **Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
 
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
@@ -9225,6 +9246,8 @@ Granular permissions assigned to `AdminRole` records:
 ### MemberStatusEnum / WorkerStatusEnum
 
 `ACTIVE` · `INACTIVE` (both); members also have `PENDING` and `TRANSFERRED`
+
+**Attended at another branch.** Attendance status `ATTENDED_ELSEWHERE` (label "Attended at another branch") marks a member who checked in as a visitor at another branch of their network that day; `attendances.attended_at_tenant_id` says where. See Church networks → visiting.
 
 **Transferred.** A member who moved to another branch of their network keeps their old record as history with `status = 'TRANSFERRED'` (see Church networks → transfers). Like `PENDING`, it counts nowhere: lists and reminders that read `status = 'ACTIVE'` skip it, and the dashboard totals, registrations trend, member cap and imports exclude `UNCOUNTED_MEMBER_STATUSES` (`PENDING`, `TRANSFERRED`). `PATCH /members/:id/status` refuses a transferred record (400), and attendance check-in refuses it with a pointer to the new branch. Admins can filter the members list with `?status=TRANSFERRED`.
 

@@ -1736,7 +1736,7 @@ export class MemberService {
       .leftJoin(
         'attendances',
         'attendance',
-        `attendance.member_id = member.id AND attendance.event_id = :eventId AND attendance.status IN ('PRESENT','LATE')`,
+        `attendance.member_id = member.id AND attendance.event_id = :eventId AND attendance.status IN ('PRESENT','LATE','ATTENDED_ELSEWHERE')`,
         { eventId },
       )
       .where('attendance.id IS NULL')
@@ -1757,7 +1757,7 @@ export class MemberService {
       .leftJoin(
         'attendances',
         'attendance',
-        `attendance.member_id = member.id AND attendance.event_id = :eventId AND attendance.status IN ('PRESENT','LATE')`,
+        `attendance.member_id = member.id AND attendance.event_id = :eventId AND attendance.status IN ('PRESENT','LATE','ATTENDED_ELSEWHERE')`,
         { eventId },
       )
       .where('attendance.id IS NULL')

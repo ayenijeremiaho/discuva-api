@@ -71,4 +71,8 @@ export class Attendance extends BaseEntity {
   // Signs the location may have been faked; informational only, never blocks a check-in.
   @Column({ type: 'character varying', array: true, default: '{}' })
   locationFlags: LocationFlagEnum[];
+
+  // The branch they visited instead, for ATTENDED_ELSEWHERE; a plain id because tenants live in the root schema.
+  @Column({ type: 'uuid', nullable: true })
+  attendedAtTenantId: string | null;
 }

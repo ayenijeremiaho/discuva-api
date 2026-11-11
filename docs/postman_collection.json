@@ -42638,6 +42638,194 @@
               "body": "{\n  \"message\": \"Your giving statement has been emailed to ada@example.com.\",\n  \"recordCount\": 4\n}"
             }
           ]
+        },
+        {
+          "name": "Visit: Nearby Branch (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/nearby?latitude=6.4474&longitude=3.4723&accuracy=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "nearby"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "6.4474"
+                },
+                {
+                  "key": "longitude",
+                  "value": "3.4723"
+                },
+                {
+                  "key": "accuracy",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Member session. Nearest other branch within 300 m, with its services open to visitors now; visit is null when nowhere is close. 20/min."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"visit\": {\n    \"tenantId\": \"uuid\",\n    \"path\": \"ABC · Lekki\",\n    \"venueName\": \"Lekki Hall\",\n    \"slots\": [\n      {\n        \"id\": \"uuid\",\n        \"name\": \"First Service\",\n        \"startTime\": \"2026-11-15T08:00:00.000Z\",\n        \"endTime\": \"2026-11-15T10:00:00.000Z\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Visit: Branch by Venue Code (member app)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/code/:code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "code",
+                ":code"
+              ]
+            },
+            "description": "Member session. The branch for a venue code from its poster. 10/min."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"tenantId\": \"uuid\",\n  \"path\": \"ABC · Lekki\",\n  \"venueName\": \"Lekki Hall\",\n  \"slots\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-11-15T08:00:00.000Z\",\n      \"endTime\": \"2026-11-15T10:00:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Visit: Check In as Visitor (member app)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/check-in",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "check-in"
+              ]
+            },
+            "description": "Member session. Location (within the service's own distance allowance) or the branch's venue code proves presence. Host records a visitor; home records ATTENDED_ELSEWHERE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"uuid\",\n  \"serviceSlotId\": \"uuid\",\n  \"location\": {\n    \"latitude\": 6.4474,\n    \"longitude\": 3.4723,\n    \"accuracy\": 20\n  }\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"message\": \"You're checked in at Lekki. Ikeja knows you were in church today.\",\n  \"path\": \"ABC · Lekki\",\n  \"suggestMove\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Visit: Venue Code (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "code"
+              ]
+            },
+            "description": "ATTENDANCE_WRITE. This branch's venue code (made on first ask), its path, and the network app's address for the poster QR."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"code\": \"K7Q2PD\",\n  \"path\": \"ABC · Lekki\",\n  \"appSubdomain\": \"abc\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Visit: New Venue Code (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/code/regenerate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "code",
+                "regenerate"
+              ]
+            },
+            "description": "ATTENDANCE_WRITE. Replaces the code; the old poster stops working."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"code\": \"N3W2QX\",\n  \"path\": \"ABC · Lekki\",\n  \"appSubdomain\": \"abc\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Visit: Visitors at a Service Day (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/visit/visitors/:eventId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "visit",
+                "visitors",
+                ":eventId"
+              ]
+            },
+            "description": "ATTENDANCE_READ. Visitors from other branches for one event here. Name and photo only."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"name\": \"Bola Ade\",\n    \"photoUrl\": null,\n    \"fromPath\": \"ABC · Ikeja\",\n    \"serviceName\": \"First Service\",\n    \"checkinTime\": \"2026-11-15T08:05:00.000Z\"\n  }\n]"
+            }
+          ]
         }
       ]
     },

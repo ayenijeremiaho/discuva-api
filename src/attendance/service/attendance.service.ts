@@ -2,6 +2,7 @@ import { EventAudienceEnum } from '../../event/enums/event-audience.enum';
 import {
   AudienceTarget,
   effectiveAudience,
+  eventVisibleToViewerSql,
 } from '../../event/utility/event-audience';
 import { CheckinCloseModeEnum } from '../../event/enums/checkin-close-mode.enum';
 import {
@@ -15,7 +16,14 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, DataSource, In, QueryFailedError, Repository } from 'typeorm';
+import {
+  Between,
+  DataSource,
+  In,
+  MoreThanOrEqual,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
@@ -105,6 +113,8 @@ export interface MyAttendanceSummary {
   periodDays: number | null;
 }
 
+// Services that started up to 12 hours either side of now can have check-in open.
+const VISITOR_LOOKAROUND_MS = 12 * 60 * 60 * 1000;
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
@@ -301,6 +311,149 @@ export class AttendanceService {
     );
 
     return { message: 'Check-in successful' };
+  }
+
+  // Host side of a visit from another branch: services open to everyone, in person, with check-in open now.
+  async openVisitorSlots(venueId?: string): Promise<ServiceSlot[]> {
+    const now = this.dateService.now();
+    const slots = await this.slotRepository.find({
+      where: {
+        startTime: Between(
+          new Date(now.getTime() - VISITOR_LOOKAROUND_MS),
+          new Date(now.getTime() + VISITOR_LOOKAROUND_MS),
+        ),
+      },
+      relations: ['event', 'config', 'config.defaultVenue', 'venueOverride'],
+      order: { startTime: 'ASC' },
+    });
+    return slots.filter((slot) => {
+      if (!this.openToVisitors(slot)) return false;
+      const cfg = this.eventService.resolveSlotConfig(slot);
+      if (venueId && cfg.venue?.id !== venueId) return false;
+      try {
+        this.validateCheckinWindow(now, slot, cfg, false);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  // The visitor must be at this service's venue (same allowance as members), unless a venue code proved it.
+  async assertVisitorCanCheckIn(
+    slotId: string,
+    location: {
+      latitude: number;
+      longitude: number;
+      accuracy?: number | null;
+    } | null,
+  ): Promise<ServiceSlot> {
+    const slot = await this.getSlotOrThrow(slotId);
+    if (!this.openToVisitors(slot)) {
+      throw new ForbiddenException(
+        `${slot.name} isn't open to visitors from other branches.`,
+      );
+    }
+    const cfg = this.eventService.resolveSlotConfig(slot);
+    this.validateCheckinWindow(this.dateService.now(), slot, cfg, false);
+    if (location && cfg.venue) {
+      const distance = UtilityService.calculateDistanceInMeters(
+        location.latitude,
+        location.longitude,
+        cfg.venue.latitude,
+        cfg.venue.longitude,
+      );
+      const slack = Math.min(
+        typeof location.accuracy === 'number' ? location.accuracy : 0,
+        cfg.allowedDistanceInMeters,
+      );
+      if (distance - slack > cfg.allowedDistanceInMeters) {
+        throw new BadRequestException(
+          "You don't seem to be at this venue. Try again inside, or use the venue code.",
+        );
+      }
+    }
+    return slot;
+  }
+
+  private openToVisitors(slot: ServiceSlot): boolean {
+    if (effectiveAudience(slot.event) !== EventAudienceEnum.EVERYONE)
+      return false;
+    if (slot.audience && effectiveAudience(slot) !== EventAudienceEnum.EVERYONE)
+      return false;
+    const format = slot.formatOverride ?? slot.config?.defaultFormat;
+    return !!slot.config && format === MeetingFormatEnum.IN_PERSON;
+  }
+
+  // Home side: the person counts as present at today's services here, without joining the headcount.
+  async recordAttendedElsewhere(
+    memberId: string,
+    atTenantId: string,
+    localDate: string,
+  ): Promise<number> {
+    const member = await this.memberService.getById(memberId, [
+      'workerProfile',
+    ]);
+    const events = await this.txHost.tx
+      .createQueryBuilder(Event, 'event')
+      .where('event.eventDate = :localDate', { localDate })
+      .andWhere(
+        'EXISTS (SELECT 1 FROM service_slots s WHERE s.event_id = event.id)',
+      )
+      .andWhere(eventVisibleToViewerSql('event'), {
+        viewerId: member.id,
+        viewerIsWorker: member.role === MemberRoleEnum.WORKER,
+      })
+      .getMany();
+    if (!events.length) return 0;
+    const existing = await this.attendanceRepository.find({
+      where: {
+        member: { id: memberId },
+        event: { id: In(events.map((e) => e.id)) },
+      },
+      relations: ['event'],
+    });
+    const byEvent = new Map(existing.map((a) => [a.event.id, a]));
+    const now = this.dateService.now();
+    let written = 0;
+    for (const event of events) {
+      const row = byEvent.get(event.id);
+      if (row && row.status !== AttendanceStatusEnum.ABSENT) continue;
+      await this.attendanceRepository.save(
+        Object.assign(
+          row ??
+            this.attendanceRepository.create({
+              member,
+              event,
+              roleAtCheckin: member.role,
+            }),
+          {
+            status: AttendanceStatusEnum.ATTENDED_ELSEWHERE,
+            attendedAtTenantId: atTenantId,
+            checkinTime: now,
+            serviceSlot: null,
+          },
+        ),
+      );
+      written++;
+    }
+    return written;
+  }
+
+  // Visits to one branch since a date, from the home side's own records.
+  countVisitsTo(
+    memberId: string,
+    tenantId: string,
+    since: Date,
+  ): Promise<number> {
+    return this.attendanceRepository.count({
+      where: {
+        member: { id: memberId },
+        status: AttendanceStatusEnum.ATTENDED_ELSEWHERE,
+        attendedAtTenantId: tenantId,
+        createdAt: MoreThanOrEqual(since),
+      },
+    });
   }
 
   // Called from AttendanceJobService's @Cron via forEachActiveTenant, which
@@ -805,6 +958,7 @@ export class AttendanceService {
       [AttendanceStatusEnum.ABSENT]: 0,
       [AttendanceStatusEnum.ON_LEAVE]: 0,
       [AttendanceStatusEnum.ATTENDED_ONLINE]: 0,
+      [AttendanceStatusEnum.ATTENDED_ELSEWHERE]: 0,
     };
 
     for (const row of rows) {
@@ -1777,7 +1931,7 @@ export class AttendanceService {
          (SELECT MAX(a2.checkin_time)
           FROM attendances a2
           WHERE a2.member_id = m.id
-            AND a2.status IN ('PRESENT','LATE','ATTENDED_ONLINE')) AS last_seen_at,
+            AND a2.status IN ('PRESENT','LATE','ATTENDED_ONLINE','ATTENDED_ELSEWHERE')) AS last_seen_at,
          EXISTS(
            SELECT 1 FROM follow_up_tasks ft
            WHERE ft.member_id = m.id

@@ -139,6 +139,7 @@ describe('NetworkService', () => {
     delGlobal: jest.fn(),
   };
   const cls = { get: jest.fn(() => current) };
+  const networkVenues = { syncCurrent: jest.fn() };
   const service = new NetworkService(
     tenantRepo as never,
     levelRepo as never,
@@ -151,6 +152,7 @@ describe('NetworkService', () => {
     auditLog as never,
     cache as never,
     cls as never,
+    networkVenues as never,
   );
 
   beforeEach(() => {
@@ -218,6 +220,7 @@ describe('NetworkService', () => {
       const node = await service.addBranch(owner, { ...dto, sponsor: true });
 
       expect(rows.find((r) => r.id === 'abc')!.networkRootId).toBe('abc');
+      expect(networkVenues.syncCurrent).toHaveBeenCalledWith('abc');
       expect(provisioning.provision).toHaveBeenCalledWith(
         expect.objectContaining({
           subdomain: 'abc-lekki',

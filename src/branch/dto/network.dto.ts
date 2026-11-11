@@ -1,6 +1,12 @@
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  Min,
+  ValidateNested,
   IsBoolean,
   IsEmail,
   IsOptional,
@@ -70,4 +76,38 @@ export class DeclineTransferDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+export class VisitLocationDto {
+  @Type(() => Number)
+  @IsLatitude()
+  latitude: number;
+
+  @Type(() => Number)
+  @IsLongitude()
+  longitude: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  accuracy?: number;
+}
+
+export class VisitCheckInDto {
+  @IsUUID()
+  tenantId: string;
+
+  @IsUUID()
+  serviceSlotId: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VisitLocationDto)
+  location?: VisitLocationDto;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{6}$/)
+  code?: string;
 }
