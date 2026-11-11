@@ -9,6 +9,8 @@ export interface NetworkSettingsValues {
   minAdmins: number;
   visitSuggestVisits: number;
   visitSuggestWeeks: number;
+  closureNoticeDays: number;
+  firstTimerHandoverDays: number;
 }
 
 export const NETWORK_SETTING_LIMITS: Record<
@@ -57,6 +59,18 @@ export const NETWORK_SETTING_LIMITS: Record<
     min: 0,
     max: 20,
     label: 'Visits before suggesting a move (0 = never)',
+  },
+  closureNoticeDays: {
+    default: 14,
+    min: 14,
+    max: 90,
+    label: 'Days’ notice before a branch closes',
+  },
+  firstTimerHandoverDays: {
+    default: 90,
+    min: 0,
+    max: 365,
+    label: 'First-timers handed over on closing (days back)',
   },
   visitSuggestWeeks: {
     default: 8,

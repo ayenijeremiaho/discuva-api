@@ -148,3 +148,14 @@ export class NetworkSettingsDto {
   @IsOptional() @IsInt() visitSuggestVisits?: number;
   @IsOptional() @IsInt() visitSuggestWeeks?: number;
 }
+
+export class ScheduleClosureDto {
+  @IsUUID()
+  tenantId: string;
+
+  @IsUUID()
+  destinationTenantId: string;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  closesOn: string;
+}

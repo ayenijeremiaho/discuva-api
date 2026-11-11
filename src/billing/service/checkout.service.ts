@@ -268,6 +268,34 @@ export class CheckoutService {
     return this.getBillingSummary();
   }
 
+  // A branch closing: whatever it pays for stops now, and any sponsorship from the church above ends.
+  async stopForClosure(tenantId: string): Promise<void> {
+    const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
+    if (!subscription) return;
+    if (
+      subscription.paymentProvider &&
+      subscription.billingProviderSubscriptionId &&
+      !subscription.sponsoredByTenantId
+    ) {
+      try {
+        await this.paymentProviderRegistry
+          .get(subscription.paymentProvider)
+          .cancelSubscription(subscription.billingProviderSubscriptionId);
+      } catch (err: any) {
+        this.logger.warn(
+          `Provider cancel failed for closing branch ${tenantId}: ${err?.message ?? err}`,
+        );
+      }
+    }
+    subscription.planId = await tenantFreePlanId(this.tenantRepo, tenantId);
+    subscription.status = SubscriptionStatus.CANCELED;
+    subscription.canceledAt = new Date();
+    subscription.cancelAtPeriodEnd = false;
+    subscription.sponsoredByTenantId = null;
+    await this.subscriptionRepo.save(subscription);
+    this.cacheService.del(`plan-features:${tenantId}`);
+  }
+
   async initiateSubscriptionCheckout(
     planId: string,
     email: string,

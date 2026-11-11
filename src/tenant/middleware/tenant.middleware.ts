@@ -54,6 +54,11 @@ const ABANDONED_REQUEST_MS = 2 * 60_000;
 // that resolves when the response actually completes, keeping the
 // transaction open for that whole span. A response status >= 400 rolls
 // back — a 401/404/500 means nothing should have committed.
+
+const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+// Sign-in, refresh and sign-out keep working on a closed branch, so its admins can still look back.
+const CLOSED_ALLOWED =
+  /^\/(v1\/)?auth\/(login|admin-login|refresh|logout|forgot-password|reset-password)(\/|$)/;
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
   private readonly logger = new Logger(TenantMiddleware.name);
@@ -114,10 +119,21 @@ export class TenantMiddleware implements NestMiddleware {
     // tenant with isActive now false was suspended by a platform admin
     // (PlatformTenantService.suspendTenant), a distinct case from "still
     // provisioning" that deserves its own message, not a generic 404.
-    if (!tenant.isActive) {
+    if (!tenant.isActive && !tenant.closedAt) {
       throw new ForbiddenException(
         'This account has been suspended. Please contact support.',
       );
+    }
+    // A closed branch stays readable for its admins; nothing in it can change (signing in and out still works).
+    if (
+      tenant.closedAt &&
+      !READ_ONLY_METHODS.has(req.method) &&
+      !CLOSED_ALLOWED.test(req.path)
+    ) {
+      throw new ForbiddenException({
+        message: `This branch closed on ${tenant.closedAt.toISOString().slice(0, 10)}. Its records are kept read-only.`,
+        code: 'BRANCH_CLOSED',
+      });
     }
 
     if (!VALID_SCHEMA_NAME.test(tenant.schemaName)) {

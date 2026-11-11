@@ -22,7 +22,12 @@ const HERE = 'lekki';
 const THERE = 'ikeja';
 
 function setup(
-  over: { role?: MemberRoleEnum; links?: any[]; admin?: boolean } = {},
+  over: {
+    role?: MemberRoleEnum;
+    links?: any[];
+    admin?: boolean;
+    closing?: boolean;
+  } = {},
 ) {
   const member = {
     id: 'm-1',
@@ -80,6 +85,15 @@ function setup(
     exists: jest.fn().mockResolvedValue(!!over.admin),
     createQueryBuilder: () => qb,
   };
+  const closureRepo = {
+    findOne: jest
+      .fn()
+      .mockResolvedValue(
+        over.closing
+          ? { closesOn: '2026-12-01', destinationTenantId: THERE }
+          : null,
+      ),
+  };
   const network = {
     isAvailable: jest.fn().mockResolvedValue(true),
     pathsOf: jest.fn().mockResolvedValue(
@@ -134,6 +148,7 @@ function setup(
     transferRepo as any,
     tenantRepo as any,
     adminRepo as any,
+    closureRepo as any,
     network as any,
     accounts as any,
     profiles as any,
@@ -310,5 +325,21 @@ describe('NetworkTransferService', () => {
       'network-transfer-declined',
       expect.objectContaining({ note: 'Finish the quarter first' }),
     );
+  });
+
+  it('moves a worker at once when their branch is closing, with nobody left to release them', async () => {
+    const t = setup({ role: MemberRoleEnum.WORKER, closing: true });
+    const result = await t.service.request('m-1', THERE);
+    expect(result.status).toBe('MOVED');
+    expect(t.memberService.markTransferred).toHaveBeenCalledWith('m-1', THERE);
+  });
+
+  it('a closing move is quiet: the member hears, the branches get one summary later', async () => {
+    const t = setup();
+    await t.service.moveForClosure('m-1', 'acc-1', HERE, THERE, ROOT);
+    const templates = t.utility.sendEmailWithTemplate.mock.calls.map(
+      (c) => c[2],
+    );
+    expect(templates).toEqual(['network-transfer-moved']);
   });
 });

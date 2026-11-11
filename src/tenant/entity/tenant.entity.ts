@@ -122,6 +122,10 @@ export class Tenant extends BaseEntity {
   @Column({ type: 'timestamptz', name: 'archived_at', nullable: true })
   archivedAt: Date | null;
 
+  // A branch closed by the church above it (Phase 4): inactive everywhere, but its admins can still sign in and read.
+  @Column({ type: 'timestamptz', name: 'closed_at', nullable: true })
+  closedAt: Date | null;
+
   // Set exactly once, the moment onboardingStatus first reaches ACTIVE
   // (TenantProvisioningProcessor.handle() for the async path,
   // PlatformTenantService.createTenant() for the inline one) — distinct from

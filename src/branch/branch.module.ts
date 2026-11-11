@@ -20,6 +20,13 @@ import { NetworkCopyService } from './service/network-copy.service';
 import { NetworkEventsService } from './service/network-events.service';
 import { NetworkEventsController } from './controller/network-events.controller';
 import { NetworkReportController } from './controller/network-report.controller';
+import { NetworkClosureController } from './controller/network-closure.controller';
+import { NetworkClosureService } from './service/network-closure.service';
+import { BranchClosure } from './entity/branch-closure.entity';
+import { EventSeries } from '../event/entity/event-series.entity';
+import { EventModule } from '../event/event.module';
+import { FollowUpModule } from '../follow-up/follow-up.module';
+import { BillingModule } from '../billing/billing.module';
 import { NetworkRollup } from './entity/network-rollup.entity';
 import { NetworkSettings } from './entity/network-settings.entity';
 import { NetworkRollupService } from './service/network-rollup.service';
@@ -62,6 +69,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
       NetworkEvent,
       NetworkEventHide,
       NetworkRollup,
+      BranchClosure,
       NetworkSettings,
       TenantRollup,
       Subscription,
@@ -77,6 +85,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
       Admin,
       NetworkVisitor,
       Event,
+      EventSeries,
       Announcement,
     ]),
     TenantModule,
@@ -86,6 +95,9 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     VenueModule,
     AttendanceModule,
     AnnouncementModule,
+    EventModule,
+    FollowUpModule,
+    BillingModule,
   ],
   controllers: [
     BranchController,
@@ -97,6 +109,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     NetworkVisitController,
     NetworkEventsController,
     NetworkReportController,
+    NetworkClosureController,
   ],
   providers: [
     BranchRollupService,
@@ -108,6 +121,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     NetworkEventsService,
     NetworkRollupService,
     NetworkReportService,
+    NetworkClosureService,
     NetworkSettingsService,
     NetworkMonthlyReportScheduler,
     NetworkCopyProcessor,

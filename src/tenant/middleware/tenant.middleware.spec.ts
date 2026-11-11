@@ -192,6 +192,47 @@ describe('TenantMiddleware', () => {
     );
   });
 
+  describe('a closed branch', () => {
+    const closed = {
+      id: 't1',
+      subdomain: 'church-a',
+      schemaName: 'church_a',
+      clusterId: 'default',
+      isActive: false,
+      closedAt: new Date('2026-12-01T00:05:00Z'),
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    };
+    const as = (method: string, path: string) =>
+      Object.assign(makeReq('church-a.localhost'), { method, path });
+
+    it('stays readable for its admins', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(closed);
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+      await middleware.use(as('GET', '/v1/members') as any, res, next);
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('refuses any change, but still lets admins sign in and out', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(closed);
+      await expect(
+        middleware.use(
+          as('POST', '/v1/members') as any,
+          makeRes(200),
+          jest.fn(),
+        ),
+      ).rejects.toMatchObject({ response: { code: 'BRANCH_CLOSED' } });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+      await middleware.use(
+        as('POST', '/v1/auth/admin-login') as any,
+        res,
+        next,
+      );
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
   describe('after-commit tasks', () => {
     const activeTenant = {
       id: 't1',

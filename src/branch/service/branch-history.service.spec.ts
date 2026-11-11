@@ -37,6 +37,8 @@ function setup(
       id: 'lekki',
       schemaName: 'church_lekki',
       currency: 'NGN',
+      isActive: true,
+      closedAt: null,
     }),
   };
   const network = {

@@ -172,6 +172,7 @@ describe('TenantInfoController', () => {
         network: null,
         networkRootId: undefined,
         hasBranches: false,
+        closedAt: null,
       });
     });
 

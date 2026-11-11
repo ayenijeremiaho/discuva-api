@@ -224,6 +224,40 @@ export class MemberService {
     return saved;
   }
 
+  // A branch closing: someone with no Discuva account is copied here as an admin-created member would be,
+  // with sign-in details sent from this church. Null when this church already has their email.
+  async createFromClosure(
+    from: Member,
+    joinedOn: Date,
+  ): Promise<Member | null> {
+    const existing = await this.memberRepository.findOne({
+      where: { email: from.email },
+      select: { id: true },
+    });
+    if (existing) return null;
+    await this.verification.assertRoomForMembers(() =>
+      this.countProvenMembers(),
+    );
+    const tempPassword = UtilityService.generateRandomPassword();
+    const saved = await this.memberRepository.save(
+      this.memberRepository.create({
+        ...Object.fromEntries(TRANSFER_FIELDS.map((f) => [f, from[f]])),
+        email: from.email,
+        password: await UtilityService.hashValue(tempPassword),
+        changedPassword: false,
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        dateJoinedChurch: joinedOn,
+      }),
+    );
+    await this.sendSignInDetails(saved, tempPassword);
+    this.auditLogService.log('MEMBER_JOINED_BY_TRANSFER', {
+      targetId: saved.id,
+      targetEmail: saved.email,
+    });
+    return saved;
+  }
+
   // Moving back to a branch they left before: the old record comes back to life.
   async welcomeBack(memberId: string): Promise<Member> {
     const member = await this.getById(memberId);

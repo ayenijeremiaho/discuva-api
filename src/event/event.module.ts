@@ -82,6 +82,11 @@ import { CheckinNudgeScheduler } from './scheduler/checkin-nudge.scheduler';
     ServiceReminderScheduler,
     CheckinNudgeScheduler,
   ],
-  exports: [TenantTypeOrmModule, EventService, EventConfigService],
+  exports: [
+    TenantTypeOrmModule,
+    EventService,
+    EventConfigService,
+    EventSeriesService,
+  ],
 })
 export class EventModule {}

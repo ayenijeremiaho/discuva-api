@@ -519,6 +519,77 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name', reason: 'reason' }),
     sampleData: { name: 'Ada', reason: "it isn't a photo of you", note: null },
   },
+  'network-branch-closing': {
+    category: null,
+    label: 'Branch closing',
+    description:
+      'Sent to every member when the church above their branch schedules its closing.',
+    lockedNote: 'The date and where they move are always included.',
+    subject: '{{default_subject}}',
+    heading: '{{branch}} is closing on {{closes_on}}',
+    message:
+      '<p>Hi {{first_name}},</p><p>{{branch}} will close on {{closes_on}}. On that day you move to {{to_church}}, with your profile, milestones and the date you first joined. Your history at {{branch}} stays with your account.</p><p>Prefer another branch? Open the app, go to My Account, then Move to another branch, any time before the date.</p>',
+    closing: '',
+    signoff: 'With love,',
+    signature: '{{church_name}}',
+    preheader: 'Where you move, and how to choose another branch.',
+    placeholders: {
+      default_subject: 'Your branch is closing',
+      first_name: 'Ada',
+      branch: 'Your Church · Lekki',
+      closes_on: '1 December 2026',
+      to_church: 'Your Church · Ikeja',
+    },
+    toVars: pick({
+      first_name: 'name',
+      branch: 'branch',
+      closes_on: 'closes_on',
+      to_church: 'to_church',
+    }),
+    sampleData: {
+      name: 'Ada',
+      branch: 'Your Church · Lekki',
+      closes_on: '1 December 2026',
+      to_church: 'Your Church · Ikeja',
+    },
+  },
+  'network-branch-closed': {
+    category: null,
+    label: 'Branch closed',
+    description:
+      'Sent when a branch closes, to the branch its members moved to and to the owners of the church that closed it.',
+    lockedNote:
+      'The counts and the list of who served where are always included.',
+    subject: '{{default_subject}}',
+    heading: '{{branch}} has closed',
+    message:
+      '<p>{{branch}} closed today. {{moved}} people moved to {{to_church}}, and {{first_timers}} recent first-timers were handed over with follow-up tasks. Those who served at {{branch}} arrive as members; their teams there are listed below.</p>',
+    closing:
+      '<p>{{branch}} stays read-only: its admins can still sign in and look back, but nothing there can change.</p>',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}} System',
+    preheader: 'Who moved, who served, and the first-timers handed over.',
+    placeholders: {
+      default_subject: 'A branch has closed',
+      branch: 'Your Church · Lekki',
+      to_church: 'Your Church · Ikeja',
+      moved: '140',
+      first_timers: '12',
+    },
+    toVars: pick({
+      branch: 'branch',
+      to_church: 'to_church',
+      moved: 'moved',
+      first_timers: 'first_timers',
+    }),
+    sampleData: {
+      branch: 'Your Church · Lekki',
+      to_church: 'Your Church · Ikeja',
+      moved: '140',
+      first_timers: '12',
+      served: [{ name: 'Ada Obi', teams: 'Choir, Ushering' }],
+    },
+  },
   'network-monthly-report': {
     category: null,
     label: 'Network monthly report',

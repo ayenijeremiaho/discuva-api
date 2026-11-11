@@ -43070,6 +43070,94 @@
               "body": "{\n  \"values\": {\n    \"noServiceWeeks\": 4\n  }\n}"
             }
           ]
+        },
+        {
+          "name": "Branch Closings (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/closures",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "closures"
+              ]
+            },
+            "description": "BRANCH_READ. Scheduled and recent closings for churches under this one."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"uuid\",\n    \"tenantId\": \"uuid\",\n    \"path\": \"ABC · Lekki\",\n    \"destinationTenantId\": \"uuid\",\n    \"destinationPath\": \"ABC · Ikeja\",\n    \"closesOn\": \"2026-12-01\",\n    \"status\": \"SCHEDULED\",\n    \"summary\": null,\n    \"createdAt\": \"2026-11-12T09:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Close a Branch (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/closures",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "closures"
+              ]
+            },
+            "description": "BRANCH_WRITE, owners. The branch must have no open branches of its own; the date at least the network's notice days ahead. Members are told at once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"uuid\",\n  \"destinationTenantId\": \"uuid\",\n  \"closesOn\": \"2026-12-01\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"uuid\",\n  \"tenantId\": \"uuid\",\n  \"path\": \"ABC · Lekki\",\n  \"destinationTenantId\": \"uuid\",\n  \"destinationPath\": \"ABC · Ikeja\",\n  \"closesOn\": \"2026-12-01\",\n  \"status\": \"SCHEDULED\",\n  \"summary\": null,\n  \"createdAt\": \"2026-11-12T09:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel a Branch Closing (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/closures/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "closures",
+                ":id"
+              ]
+            },
+            "description": "BRANCH_WRITE, owners. Only before the date."
+          },
+          "response": [
+            {
+              "name": "204",
+              "status": "OK",
+              "code": 204,
+              "body": ""
+            }
+          ]
         }
       ]
     },

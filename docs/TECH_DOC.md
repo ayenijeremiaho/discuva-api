@@ -2759,6 +2759,7 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Network settings:** root table `network_settings (network_root_id, settings jsonb)`. `GET /network/settings` (BRANCH_READ) returns `{ values, limits }`; `PUT /network/settings` (BRANCH_WRITE, owners of the top church only, 403 otherwise; 400 outside the platform limits) saves them, cached 10 min.
   - **Defaults and limits:** attention drop 15% (5–50), weeks compared 6 (3–12), not contacted 5 (1–50) after 7 days (3–21), no service 3 weeks (2–8), unreachable 20% (5–80), fewest admins 2 (1–5).
   - **Visit suggestion:** 4 visits (0–20) in 8 weeks (2–26). These replace the earlier platform settings `network_visit_suggest_*`.
+  - **Closing a branch:** notice 14 days (14–90); first-timers handed over from the last 90 days (0–365).
 - **Reading:** `GET /network/report?month=YYYY-MM` (BRANCH_READ; default this month, any of the last 12) returns `{ period, periods, final, updatedAt, churches: [{ id, path, computedAt, figures, perHundred, attendancePerService, onlinePercent, contactedPercent }], totals, median, attention: [{ churchId, path, kind, detail }] }`. It covers the current church and everything under it.
   - **Masking:** counts of people from 1 to 4 (in figures, totals and medians) come back as `"FEWER_THAN_5"`; per-100 figures are left out below 5.
   - **Caching:** cached under `network-report:<churchId>:<period>:<version>`, where the version (`network-rollup-ver:<rootId>`) changes whenever any branch is recounted.
@@ -2769,6 +2770,33 @@ A network is a **tree of churches** under one top church. Each church is still i
   - **Per branch:** at most one recount per wait period (6 an hour at 10 minutes, none in a quiet week) plus one a night.
   - **Each recount:** about 10 indexed reads in the branch, 3 in the root, and one upsert of one or two small rows.
   - **Reading:** report pages are one indexed root read, cached until a figure changes.
+
+**Closing a branch:** owners of any church above a branch set a closing date and a destination; on that day everyone moves and the branch is kept read-only. `NetworkClosureService`, `src/branch/service/network-closure.service.ts`.
+- **Endpoints (admin):** `GET /network/closures` (BRANCH_READ) lists up to 20 recent closings for churches under the current one (`{ id, tenantId, path, destinationTenantId, destinationPath, closesOn, status, summary }`). `POST /network/closures { tenantId, destinationTenantId, closesOn: 'YYYY-MM-DD' }` (BRANCH_WRITE, owners only). `DELETE /network/closures/:id` (BRANCH_WRITE, owners; 204) cancels a scheduled one.
+- **Rules:**
+  - the branch must be open, under the current church and not the church itself;
+  - it must have no open branches of its own ("Move or close the branches under it first");
+  - the destination must be another open church in the network;
+  - the date must be at least `closureNoticeDays` ahead (network setting, default 14, 14–90) and within a year, in the branch's time zone;
+  - one closing date per branch at a time (partial unique index).
+- **Scheduling:** saves a root `branch_closures` row with status `SCHEDULED` (then `RUNNING`, `DONE`, `CANCELLED` or `FAILED`), `closes_on`, and `run_at` (00:05 on that date in the branch's time zone). It books one delayed `network-copy` job (`kind: 'closure'`, `jobId: closure:<id>`). Members get a system announcement in the branch (with its push) and an email each (`network-branch-closing`). Cancelling removes the job and posts "X is staying open". The 03:30 nightly job re-queues any `SCHEDULED` closing past its `run_at` (`idx_branch_closures_run_at`), in case the queue lost it.
+- **While it's scheduled:** `GET /network/transfer` includes `closure: { closesOn, toTenantId, toPath }`, and the member app's Move screen shows the notice. Workers there move at once, without release, since the branch is closing.
+- **On the date** (`run`):
+  - **Who moves:** every active or pending member, each in their own transaction.
+  - **With a Discuva account:** the ordinary transfer (`NetworkTransferService.moveForClosure`, which logs a `network_transfers` row). It's quiet: no per-person admin emails; the member still gets "You've moved".
+  - **Without an account:** copied to the destination like an admin-created member, with sign-in details sent from there (`MemberService.createFromClosure`), unless the destination already has their email. The old record becomes `TRANSFERRED`. Inactive members stay as history.
+  - **First-timers:** those from the last `firstTimerHandoverDays` (network setting, default 90, 0–365), not yet converted, are created at the destination with follow-up tasks and a "Handed over from X" note (`FollowUpService.createFirstTimerFromHandover`). A rerun skips ones already there by phone and visit date.
+  - **Events:** active series stop and upcoming services without history are deleted.
+  - **Billing:** `CheckoutService.stopForClosure` cancels any provider subscription, moves the branch to the free plan and ends sponsorship.
+  - **The branch:** `tenants.is_active = false`, `closed_at = now()`; the picker cache is cleared and its event copies removed.
+  - **Emails:** `network-branch-closed` (who moved, first-timers handed over, who served on which teams) goes to the destination's owners and member admins, and to the owners of the church that closed it.
+  - **Record:** the closure is saved with a `summary` (`moved`, `copied`, `alreadyThere`, `stayedInactive`, `firstTimers`, `eventsCancelled`, `seriesStopped`, `failed`). A destination that's no longer open marks it `FAILED` instead.
+- **After closing (read-only):** `TenantMiddleware` lets a closed church through (it's inactive but has `closed_at`). It refuses anything but GET, HEAD and OPTIONS with 403 `{ code: 'BRANCH_CLOSED' }`, except sign-in, refresh, sign-out and password reset, so its admins can still look back. `GET /tenant/info` returns `closedAt` and the portal shows a read-only banner.
+  - **Members of the closed branch:** they all have `TRANSFERRED` records, so signing in there answers `MOVED_BRANCH`. Their **Past branches** history still opens the closed branch.
+  - **Everywhere else:** being inactive keeps it out of pickers, reports, the agenda and every scheduled job. Network nodes carry `closedAt`; the console's network detail lists closings.
+  - **Reopening:** staff-assisted, on the Later list.
+- **Migration:** root `1807296000000-AddBranchClosures` (`tenants.closed_at`, `branch_closures` with `uq_branch_closures_scheduled`, `idx_branch_closures_run_at` and `idx_branch_closures_root`).
+- **Database cost:** nothing polls. One job per closing on the day, plus the nightly indexed check for overdue ones. The day itself does a few writes per member (about 450 ms for three members locally).
 
 **Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
 

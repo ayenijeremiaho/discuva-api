@@ -31,6 +31,10 @@ import {
   NetworkTransferStatus,
 } from '../entity/network-transfer.entity';
 import { NetworkService } from './network.service';
+import {
+  BranchClosure,
+  BranchClosureStatus,
+} from '../entity/branch-closure.entity';
 
 type Church = Pick<Tenant, 'id' | 'schemaName' | 'subdomain' | 'networkRootId'>;
 
@@ -43,6 +47,8 @@ export interface TransferOptions {
   hasAccount: boolean;
   isAdmin: boolean;
   needsRelease: boolean;
+  // This branch is closing: where everyone moves on the date unless they choose elsewhere first.
+  closure: { closesOn: string; toTenantId: string; toPath: string } | null;
   pending: {
     id: string;
     toTenantId: string;
@@ -71,6 +77,8 @@ export class NetworkTransferService {
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(BranchClosure)
+    private readonly closureRepo: Repository<BranchClosure>,
     private readonly network: NetworkService,
     private readonly accounts: DiscuvaAccountService,
     private readonly profiles: DiscuvaProfileService,
@@ -93,14 +101,24 @@ export class NetworkTransferService {
     const pending = member.discuvaAccountId
       ? await this.pendingFor(member.discuvaAccountId)
       : null;
-    const paths = pending
-      ? await this.network.pathsOf(pending.networkRootId, [pending.toTenantId])
-      : new Map<string, string>();
+    const closure = await this.closingNow(here.id);
+    const pathIds = [pending?.toTenantId, closure?.destinationTenantId].filter(
+      (id): id is string => !!id,
+    );
+    const paths =
+      pathIds.length && here.networkRootId
+        ? await this.network.pathsOf(here.networkRootId, pathIds)
+        : new Map<string, string>();
     return {
       available: available && !!here.networkRootId,
       hasAccount: !!member.discuvaAccountId,
       isAdmin: await this.isAdmin(memberId),
-      needsRelease: member.role === MemberRoleEnum.WORKER,
+      needsRelease: member.role === MemberRoleEnum.WORKER && !closure,
+      closure: closure && {
+        closesOn: closure.closesOn,
+        toTenantId: closure.destinationTenantId,
+        toPath: paths.get(closure.destinationTenantId) ?? '',
+      },
       pending: pending && {
         id: pending.id,
         toTenantId: pending.toTenantId,
@@ -154,7 +172,10 @@ export class NetworkTransferService {
       toTenantId: target.id,
       fromMemberId: member.id,
       status: NetworkTransferStatus.PENDING,
-      needsRelease: member.role === MemberRoleEnum.WORKER,
+      // A closing branch has nobody left to release workers, so they move like everyone else.
+      needsRelease:
+        member.role === MemberRoleEnum.WORKER &&
+        !(await this.closingNow(here.id)),
     });
 
     if (transfer.needsRelease) {
@@ -275,9 +296,30 @@ export class NetworkTransferService {
   }
 
   // New branch first, so a failure part-way leaves the old record untouched and a retry reuses the new one.
+  // A branch closing moves everyone with an account the ordinary way; its admins get one summary, not one email each.
+  async moveForClosure(
+    memberId: string,
+    accountId: string,
+    fromTenantId: string,
+    toTenantId: string,
+    rootId: string,
+  ): Promise<void> {
+    const transfer = this.transferRepo.create({
+      networkRootId: rootId,
+      accountId,
+      fromTenantId,
+      toTenantId,
+      fromMemberId: memberId,
+      status: NetworkTransferStatus.PENDING,
+      needsRelease: false,
+    });
+    await this.execute(transfer, null, { quiet: true });
+  }
+
   private async execute(
     transfer: NetworkTransfer,
     actorId: string | null,
+    { quiet = false }: { quiet?: boolean } = {},
   ): Promise<void> {
     const from = await this.memberService.getByIdWithCredentials(
       transfer.fromMemberId,
@@ -355,14 +397,15 @@ export class NetworkTransferService {
         'network-transfer-moved',
         { name, from_church: fromPath, to_church: toPath },
       );
-      await this.emailAdmins(
-        'network-transfer-arrived',
-        `${this.fullName(from)} Moved to Your Branch`,
-        {
-          member_name: this.fullName(from),
-          from_church: fromPath,
-        },
-      );
+      if (!quiet)
+        await this.emailAdmins(
+          'network-transfer-arrived',
+          `${this.fullName(from)} Moved to Your Branch`,
+          {
+            member_name: this.fullName(from),
+            from_church: fromPath,
+          },
+        );
       return member;
     });
 
@@ -377,14 +420,15 @@ export class NetworkTransferService {
     await this.push.unsubscribe(from.id);
     await this.sessions.updateLogout(from.id, SessionSurface.MEMBER);
 
-    await this.emailAdmins(
-      'network-transfer-left',
-      `${this.fullName(from)} Moved to Another Branch`,
-      {
-        member_name: this.fullName(from),
-        to_church: toPath,
-      },
-    );
+    if (!quiet)
+      await this.emailAdmins(
+        'network-transfer-left',
+        `${this.fullName(from)} Moved to Another Branch`,
+        {
+          member_name: this.fullName(from),
+          to_church: toPath,
+        },
+      );
   }
 
   private inChurch<T>(church: Church, fn: () => Promise<T>): Promise<T> {
@@ -419,6 +463,18 @@ export class NetworkTransferService {
     for (const email of new Set(emails)) {
       this.utility.sendEmailWithTemplate(email, subject, template, data);
     }
+  }
+
+  private closingNow(tenantId: string): Promise<BranchClosure | null> {
+    return this.closureRepo.findOne({
+      where: {
+        tenantId,
+        status: In([
+          BranchClosureStatus.SCHEDULED,
+          BranchClosureStatus.RUNNING,
+        ]),
+      },
+    });
   }
 
   private async isAdmin(memberId: string): Promise<boolean> {

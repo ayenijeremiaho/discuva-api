@@ -239,6 +239,8 @@ export class TenantInfoController {
       networkRootId: tenant.networkRootId,
       // Whether "Send to all branches" applies: only a church with branches under it.
       hasBranches,
+      // A closed branch's portal stays readable; the apps say so.
+      closedAt: own.closedAt ?? null,
       themePreset: tenant.themePreset,
       previousThemePreset: tenant.previousThemePreset,
       currency: tenant.currency,

@@ -140,10 +140,19 @@ export class BranchHistoryService {
     );
     const church = move
       ? await this.tenantRepo.findOne({
-          where: { id: tenantId, isActive: true },
-          select: { id: true, schemaName: true, currency: true },
+          where: { id: tenantId },
+          select: {
+            id: true,
+            schemaName: true,
+            currency: true,
+            isActive: true,
+            closedAt: true,
+          },
         })
       : null;
+    // A closed branch stays readable, so people can still look back at their time there.
+    if (church && !church.isActive && !church.closedAt)
+      throw new NotFoundException('No history at that branch.');
     if (!move || !church)
       throw new NotFoundException('No history at that branch.');
     return { move, church, done };

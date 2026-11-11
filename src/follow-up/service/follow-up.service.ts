@@ -164,6 +164,13 @@ export class FollowUpService {
     return created;
   }
 
+  // A closing branch hands its recent first-timers to the branch its members move to; they're assigned as usual here.
+  async createFirstTimerFromHandover(
+    dto: CreateFirstTimerDto,
+  ): Promise<FirstTimer> {
+    return this.doCreateFirstTimer(dto, {});
+  }
+
   async createFirstTimerByAdmin(
     dto: CreateFirstTimerDto,
     adminId: string,

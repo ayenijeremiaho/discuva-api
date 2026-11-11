@@ -141,6 +141,7 @@ describe('NetworkService', () => {
   const cls = { get: jest.fn(() => current) };
   const networkVenues = { syncCurrent: jest.fn() };
   const networkShare = { joinedNetwork: jest.fn() };
+  const closureRepo = { find: jest.fn().mockResolvedValue([]) };
   const service = new NetworkService(
     tenantRepo as never,
     levelRepo as never,
@@ -155,6 +156,7 @@ describe('NetworkService', () => {
     cls as never,
     networkVenues as never,
     networkShare as never,
+    closureRepo as never,
   );
 
   beforeEach(() => {

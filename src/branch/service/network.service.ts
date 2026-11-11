@@ -28,6 +28,7 @@ import { NetworkLevel } from '../entity/network-level.entity';
 import { NetworkMove } from '../entity/network-move.entity';
 import { NetworkVenueService } from '../../venue/service/network-venue.service';
 import { NetworkShareService } from '../../network-share/network-share.service';
+import { BranchClosure } from '../entity/branch-closure.entity';
 import { TenantRollup } from '../entity/tenant-rollup.entity';
 import { AddBranchDto } from '../dto/network.dto';
 
@@ -60,6 +61,8 @@ export interface NetworkNode {
   path: string;
   childCount: number;
   isActive: boolean;
+  // Set once the church above closed it; it then stays read-only.
+  closedAt: Date | null;
 }
 
 export interface NetworkView {
@@ -92,6 +95,7 @@ type TreeRow = Pick<
   | 'networkLabel'
   | 'networkRootId'
   | 'isActive'
+  | 'closedAt'
 >;
 
 interface Tree {
@@ -133,6 +137,8 @@ export class NetworkService {
     private readonly cls: ClsService<AppClsStore>,
     private readonly networkVenues: NetworkVenueService,
     private readonly networkShare: NetworkShareService,
+    @InjectRepository(BranchClosure)
+    private readonly closureRepo: Repository<BranchClosure>,
   ) {}
 
   isAvailable(): Promise<boolean> {
@@ -433,6 +439,11 @@ export class NetworkService {
     return { network };
   }
 
+  // The branch picker's cached list, after a church opens or closes.
+  forgetPublicNetwork(rootId: string): void {
+    this.cache.delGlobal(publicKey(rootId));
+  }
+
   // Display paths ("ABC · Lagos · Ikeja") for churches in one network.
   async pathsOf(rootId: string, ids: string[]): Promise<Map<string, string>> {
     const tree = await this.loadTree(rootId);
@@ -475,6 +486,12 @@ export class NetworkService {
     nodes: (NetworkNode & { memberCount: number | null })[];
     levels: string[];
     moves: NetworkView['recentMoves'];
+    closures: {
+      church: string;
+      destination: string;
+      closesOn: string;
+      status: string;
+    }[];
   }> {
     const [tree, levels, maxLevels] = await Promise.all([
       this.loadTree(rootId),
@@ -484,12 +501,17 @@ export class NetworkService {
     if (!tree.byId.has(rootId))
       throw new NotFoundException('Network not found');
     const ids = this.subtreeIds(tree, rootId);
-    const [rollups, moves] = await Promise.all([
+    const [rollups, moves, closures] = await Promise.all([
       this.rollupRepo.find({
         where: { tenantId: In(ids) },
         select: { tenantId: true, memberCount: true },
       }),
       this.moveRepo.find({
+        where: { networkRootId: rootId },
+        order: { createdAt: 'DESC' },
+        take: 20,
+      }),
+      this.closureRepo.find({
         where: { networkRootId: rootId },
         order: { createdAt: 'DESC' },
         take: 20,
@@ -509,6 +531,12 @@ export class NetworkService {
         from: path(m.fromParentId),
         to: path(m.toParentId),
         at: m.createdAt,
+      })),
+      closures: closures.map((c) => ({
+        church: path(c.tenantId) ?? '',
+        destination: path(c.destinationTenantId) ?? '',
+        closesOn: c.closesOn,
+        status: c.status,
       })),
     };
   }
@@ -578,6 +606,7 @@ export class NetworkService {
         networkLabel: true,
         networkRootId: true,
         isActive: true,
+        closedAt: true,
       },
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -658,6 +687,7 @@ export class NetworkService {
         .join(' · '),
       childCount: tree.children.get(id)?.length ?? 0,
       isActive: row.isActive,
+      closedAt: row.closedAt ?? null,
     };
   }
 
