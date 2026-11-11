@@ -9,7 +9,8 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 const LOCK = 'lock:network-events-nightly';
 
-// Once a night, churches in a network re-copy their events: past ones age out, and series dates added overnight appear.
+// Once a night, churches in a network re-copy their events (past ones age out, new series dates appear)
+// and recount their report figures ("stopped attending" moves with the calendar, and last month freezes after the 7th).
 @Injectable()
 export class NetworkEventsScheduler {
   private readonly logger = new Logger(NetworkEventsScheduler.name);
@@ -29,7 +30,10 @@ export class NetworkEventsScheduler {
         where: { networkRootId: Not(IsNull()), isActive: true },
         select: { id: true },
       });
-      for (const t of tenants) await this.share.queueEventsCopy(t.id);
+      for (const t of tenants) {
+        await this.share.queueEventsCopy(t.id);
+        await this.share.queueRollupNow(t.id);
+      }
       if (tenants.length)
         this.logger.log(
           `Queued network event copies for ${tenants.length} church(es)`,

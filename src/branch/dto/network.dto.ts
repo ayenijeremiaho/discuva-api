@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsISO8601,
+  IsInt,
   IsLatitude,
   IsLongitude,
   IsNumber,
@@ -128,4 +129,22 @@ export class DateWindowDto {
 export class HiddenDto {
   @IsBoolean()
   hidden: boolean;
+}
+
+export class ReportQueryDto {
+  @IsOptional()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/)
+  month?: string;
+}
+
+export class NetworkSettingsDto {
+  @IsOptional() @IsInt() attendanceDropPercent?: number;
+  @IsOptional() @IsInt() attendanceWeeks?: number;
+  @IsOptional() @IsInt() notContactedCount?: number;
+  @IsOptional() @IsInt() notContactedDays?: number;
+  @IsOptional() @IsInt() noServiceWeeks?: number;
+  @IsOptional() @IsInt() unreachablePercent?: number;
+  @IsOptional() @IsInt() minAdmins?: number;
+  @IsOptional() @IsInt() visitSuggestVisits?: number;
+  @IsOptional() @IsInt() visitSuggestWeeks?: number;
 }

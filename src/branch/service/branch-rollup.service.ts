@@ -1,13 +1,6 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { tenantFreePlanId } from '../../billing/util/free-plan.util';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -19,7 +12,6 @@ import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
-import { SubscriptionStatus } from '../../billing/enum/subscription-status.enum';
 import { CacheService } from '../../utility/service/cache.service';
 
 // "Active in the last N days" — same window/definition of "attended" used
@@ -33,21 +25,6 @@ interface TenantStats {
   memberCount: number;
   attendanceRate: number | null;
   totalGiving: number;
-}
-
-export interface BranchOverviewItem {
-  tenantId: string;
-  name: string;
-  subdomain: string;
-  // null (not 0) whenever sharingEnabled is false — distinct from "shared,
-  // but genuinely zero so far".
-  memberCount: number | null;
-  attendanceRate: number | null;
-  totalGiving: number | null;
-  computedAt: Date | null;
-  // Only meaningful when sharingEnabled is true — a branch can share
-  // engagement stats while still keeping giving specifically private.
-  givingShared: boolean;
 }
 
 // Computes and upserts ONE tenant's own tenant_rollups row, run from inside
@@ -84,42 +61,6 @@ export class BranchRollupService {
       throw new ForbiddenException('No tenant context for this request.');
     }
     return tenantId;
-  }
-
-  // Parent's overview reads only public.tenant_rollups WHERE tenant_id IN
-  // (children of this tenant) — never reaches into a branch's own schema or
-  // shard, exactly as designed in §11.3. This is the read half of the
-  // "local compute, pushed rollups" design; computeAndUpsertOne is the
-  // write half, run entirely separately by the daily cron.
-  async getOverview(): Promise<BranchOverviewItem[]> {
-    const parentTenantId = this.currentTenantId();
-
-    const branches = await this.tenantRepo.find({
-      where: { parentTenantId },
-      order: { name: 'ASC' },
-    });
-    if (!branches.length) return [];
-
-    const rollups = await this.rollupRepo.findBy({
-      tenantId: In(branches.map((b) => b.id)),
-    });
-    const rollupByTenantId = new Map(rollups.map((r) => [r.tenantId, r]));
-
-    return branches.map((branch) => {
-      const rollup = rollupByTenantId.get(branch.id);
-      return {
-        tenantId: branch.id,
-        name: branch.name,
-        subdomain: branch.subdomain,
-        memberCount: rollup?.memberCount ?? 0,
-        attendanceRate: rollup?.attendanceRate ?? null,
-        totalGiving: branch.shareGivingWithParent
-          ? (rollup?.totalGiving ?? null)
-          : null,
-        computedAt: rollup?.computedAt ?? null,
-        givingShared: branch.shareGivingWithParent,
-      };
-    });
   }
 
   // Network figures always reach the churches above; only giving is the branch's own choice.

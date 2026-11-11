@@ -19,6 +19,13 @@ import { NetworkEventHide } from './entity/network-event-hide.entity';
 import { NetworkCopyService } from './service/network-copy.service';
 import { NetworkEventsService } from './service/network-events.service';
 import { NetworkEventsController } from './controller/network-events.controller';
+import { NetworkReportController } from './controller/network-report.controller';
+import { NetworkRollup } from './entity/network-rollup.entity';
+import { NetworkSettings } from './entity/network-settings.entity';
+import { NetworkRollupService } from './service/network-rollup.service';
+import { NetworkReportService } from './service/network-report.service';
+import { NetworkSettingsService } from './service/network-settings.service';
+import { NetworkMonthlyReportScheduler } from './scheduler/network-monthly-report.scheduler';
 import { NetworkCopyProcessor } from './processor/network-copy.processor';
 import { Event } from '../event/entity/event.entity';
 import { Announcement } from '../announcement/entity/announcement.entity';
@@ -54,6 +61,8 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
       NetworkVisitCode,
       NetworkEvent,
       NetworkEventHide,
+      NetworkRollup,
+      NetworkSettings,
       TenantRollup,
       Subscription,
     ]),
@@ -87,6 +96,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     BranchHistoryController,
     NetworkVisitController,
     NetworkEventsController,
+    NetworkReportController,
   ],
   providers: [
     BranchRollupService,
@@ -96,6 +106,10 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     NetworkVisitService,
     NetworkCopyService,
     NetworkEventsService,
+    NetworkRollupService,
+    NetworkReportService,
+    NetworkSettingsService,
+    NetworkMonthlyReportScheduler,
     NetworkCopyProcessor,
     BranchRollupScheduler,
     NetworkEventsScheduler,

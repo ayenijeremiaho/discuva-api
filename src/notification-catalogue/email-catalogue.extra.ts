@@ -519,6 +519,48 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name', reason: 'reason' }),
     sampleData: { name: 'Ada', reason: "it isn't a photo of you", note: null },
   },
+  'network-monthly-report': {
+    category: null,
+    label: 'Network monthly report',
+    description:
+      'Sent on the 8th to owners of a church with branches: last month across every church under it, and what needs a look.',
+    lockedNote:
+      'The figures and the list of what needs a look are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your network in {{month_label}}',
+    message:
+      '<p>Hi {{first_name}},</p><p>Here is how {{church_name}} and the {{branch_count}} churches under it did in {{month_label}}. Counts under 5 show as "fewer than 5".</p>',
+    closing: '',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}} System',
+    preheader: 'Last month across your branches.',
+    placeholders: {
+      default_subject: 'Your network last month',
+      first_name: 'Ada',
+      month_label: 'October 2026',
+      branch_count: '12',
+    },
+    toVars: pick({
+      first_name: 'name',
+      month_label: 'month_label',
+      branch_count: 'branch_count',
+    }),
+    sampleData: {
+      name: 'Ada',
+      month_label: 'October 2026',
+      branch_count: '12',
+      figures: [
+        { label: 'Members', value: '2,480' },
+        { label: 'First-timers', value: '96' },
+      ],
+      attention: [
+        {
+          path: 'Your Church · Ikeja',
+          detail: 'Attendance is down 22% on the 6 weeks before.',
+        },
+      ],
+    },
+  },
   'network-transfer-moved': {
     category: null,
     label: 'Moved to another branch',

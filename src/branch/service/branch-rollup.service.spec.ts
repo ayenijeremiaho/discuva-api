@@ -2,11 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+
 import { BranchRollupService } from './branch-rollup.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { TenantRollup } from '../entity/tenant-rollup.entity';
@@ -14,7 +10,6 @@ import { Member } from '../../member/entity/member.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
-import { SubscriptionStatus } from '../../billing/enum/subscription-status.enum';
 import { CacheService } from '../../utility/service/cache.service';
 
 const mockTenantRepo = {
@@ -142,95 +137,6 @@ describe('BranchRollupService', () => {
       expect(mockRollupRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ attendanceRate: null, totalGiving: 0 }),
       );
-    });
-  });
-
-  describe('getOverview', () => {
-    it('throws when called with no tenant in CLS', async () => {
-      mockCls.get.mockReturnValue(undefined);
-      await expect(service.getOverview()).rejects.toThrow(ForbiddenException);
-    });
-
-    it('returns an empty array when this tenant has no branches', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.find.mockResolvedValue([]);
-      expect(await service.getOverview()).toEqual([]);
-      expect(mockRollupRepo.findBy).not.toHaveBeenCalled();
-    });
-
-    it('joins each branch with its rollup, defaulting missing rollups to zero/null', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.find.mockResolvedValue([
-        {
-          id: 'branch-1',
-          name: 'Branch One',
-          subdomain: 'branch-one',
-          shareDataWithParent: true,
-          shareGivingWithParent: true,
-        },
-        {
-          id: 'branch-2',
-          name: 'Branch Two',
-          subdomain: 'branch-two',
-          shareDataWithParent: true,
-          shareGivingWithParent: false,
-        },
-      ]);
-      mockRollupRepo.findBy.mockResolvedValue([
-        {
-          tenantId: 'branch-1',
-          memberCount: 50,
-          attendanceRate: 75,
-          totalGiving: 100000,
-          computedAt: new Date('2026-08-01'),
-        },
-      ]);
-
-      const result = await service.getOverview();
-
-      expect(result).toEqual([
-        expect.objectContaining({
-          tenantId: 'branch-1',
-          memberCount: 50,
-          totalGiving: 100000,
-          givingShared: true,
-        }),
-        expect.objectContaining({
-          tenantId: 'branch-2',
-          memberCount: 0,
-          attendanceRate: null,
-          totalGiving: null,
-          computedAt: null,
-          givingShared: false,
-        }),
-      ]);
-    });
-
-    it('shares engagement but hides giving when shareGivingWithParent is false', async () => {
-      mockCls.get.mockReturnValue('parent-1');
-      mockTenantRepo.find.mockResolvedValue([
-        {
-          id: 'branch-1',
-          name: 'Branch One',
-          subdomain: 'branch-one',
-          shareDataWithParent: true,
-          shareGivingWithParent: false,
-        },
-      ]);
-      mockRollupRepo.findBy.mockResolvedValue([
-        {
-          tenantId: 'branch-1',
-          memberCount: 50,
-          attendanceRate: 75,
-          totalGiving: 100000,
-          computedAt: new Date('2026-08-01'),
-        },
-      ]);
-
-      const result = await service.getOverview();
-
-      expect(result[0].memberCount).toBe(50);
-      expect(result[0].totalGiving).toBeNull();
     });
   });
 

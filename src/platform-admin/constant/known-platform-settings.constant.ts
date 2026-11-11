@@ -192,19 +192,12 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 0,
     max: 2,
   },
-  [PlatformSettingKey.NETWORK_VISIT_SUGGEST_VISITS]: {
-    label: 'Visits Before Suggesting a Move',
-    unit: 'visits to the same branch within the weeks below; 0 = never suggest',
-    defaultValue: 4,
-    min: 0,
-    max: 20,
-  },
-  [PlatformSettingKey.NETWORK_VISIT_SUGGEST_WEEKS]: {
-    label: 'Weeks Counted for a Move Suggestion',
-    unit: 'weeks',
-    defaultValue: 8,
+  [PlatformSettingKey.NETWORK_ROLLUP_WAIT_MINUTES]: {
+    label: 'Network Report Wait',
+    unit: 'minutes after a change before a branch’s report figures are recalculated (one recalculation per burst)',
+    defaultValue: 10,
     min: 2,
-    max: 26,
+    max: 60,
   },
   [PlatformSettingKey.NETWORK_MAX_LEVELS]: {
     label: 'Levels in a Church Network',

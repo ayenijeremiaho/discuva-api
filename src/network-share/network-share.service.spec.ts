@@ -11,7 +11,9 @@ function setup(root: string | null, hasBranches = true) {
     getGlobal: jest.fn().mockResolvedValue(undefined),
     setGlobal: jest.fn(),
     delGlobal: jest.fn(),
+    acquireLock: jest.fn().mockResolvedValue(true),
   };
+  const platformSettings = { getNumber: jest.fn().mockResolvedValue(10) };
   const cls = { get: jest.fn().mockReturnValue('t1') };
   return {
     service: new NetworkShareService(
@@ -19,6 +21,7 @@ function setup(root: string | null, hasBranches = true) {
       queue as never,
       cache as never,
       cls as never,
+      platformSettings as never,
     ),
     queue,
     cache,
@@ -64,5 +67,25 @@ describe('NetworkShareService', () => {
     await expect(
       setup('root', true).service.assertCanShare(),
     ).resolves.toBeUndefined();
+  });
+
+  it('books one report recalculation after the wait, and later changes in that wait cost one Redis check', async () => {
+    const t = setup('root');
+    await t.service.rollupChanged();
+    expect(t.cache.acquireLock).toHaveBeenCalledWith('rollup-mark:t1', 600);
+    expect(t.queue.add).toHaveBeenCalledWith(
+      { kind: 'rollup', sourceTenantId: 't1' },
+      expect.objectContaining({ jobId: 'rollup:t1', delay: 600_000 }),
+    );
+    t.queue.add.mockClear();
+    t.cache.acquireLock.mockResolvedValue(false);
+    await t.service.rollupChanged();
+    expect(t.queue.add).not.toHaveBeenCalled();
+  });
+
+  it('never marks a church outside a network', async () => {
+    const t = setup(null);
+    await t.service.rollupChanged();
+    expect(t.cache.acquireLock).not.toHaveBeenCalled();
   });
 });

@@ -2662,7 +2662,7 @@ A network is a **tree of churches** under one top church. Each church is still i
 
 **Addresses for everyone else:** hyphens are kept for branch addresses. Sign-up, the sign-up live check (`GET /signup/subdomain-availability`) and console church creation accept only `^[a-z0-9]{1,63}$`. `checkSubdomain(sub, { allowHyphen: true })` is used only by the Network page. Existing hyphenated churches keep working as standalone.
 
-**Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
+**Giving sharing:** figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The old `GET /branch/overview` is replaced by the network report below.
 
 **Network app and home branches:**
 - **The app:** the member app installed from the top church's address is the network's app. It works as the person's home branch from that one address by holding that branch's sign-in and sending that branch's address in `X-Tenant-Subdomain` before sign-in. Requests after sign-in already take the church from the token.
@@ -2710,7 +2710,7 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Host side:** tenant table `network_visitors` (`event_id`, `service_slot_id`, `account_id`, `from_tenant_id`, `firstname`, `lastname`, `photo_url`, `checkin_time`; unique `(event_id, account_id)`; index `(account_id, checkin_time)` for the suggestion count). Name and photo only; no member record is created and the host's headcount is untouched. Admin: `GET /network/visit/visitors/:eventId` (ATTENDANCE_READ) returns `[{ id, name, photoUrl, fromPath, serviceName, checkinTime }]`.
 - **Home side:** `AttendanceService.recordAttendedElsewhere` writes status `ATTENDED_ELSEWHERE` with `attendances.attended_at_tenant_id` for each of the home branch's service days on that local date (home time zone) that the person is in the audience for. It replaces an `ABSENT` row and leaves any other row alone. Absence marking skips them (`getMembersNotCheckedInForEvent` / `getWorkersNotCheckedInForEvent` treat it like present), and the at-risk list's "last seen" counts it. It is not in headcounts, streaks or "genuinely attended" counts. Checking in at home later the same day replaces it as usual.
 - **Venue codes:** root table `network_visit_codes (tenant_id PK, code UNIQUE)`, 6 characters with no look-alikes (no 0/O, 1/I/L), made on first ask. `GET /network/visit/code` (ATTENDANCE_WRITE) returns `{ code, path, appSubdomain }`; the admin poster's QR opens `<network app>/visit?code=<code>`. `POST /network/visit/code/regenerate` replaces it, and the old code stops working (audit `NETWORK_VISIT_CODE_CHANGED`).
-- **Move suggestion:** platform settings `network_visit_suggest_visits` (default 4, 0 = never) and `network_visit_suggest_weeks` (default 8). When the person's visits to that branch in the window reach the number, `suggestMove` is true and the app offers "make it your home branch?". A per-network override comes with network settings.
+- **Move suggestion:** the network's settings `visitSuggestVisits` (default 4, 0 = never) and `visitSuggestWeeks` (default 8). When the person's visits to that branch in the window reach the number, `suggestMove` is true and the app offers "make it your home branch?".
 - **Audit:** `NETWORK_VISIT_CHECKIN`.
 - **Migrations:** root `1807036800000-AddNetworkVenuesAndVisitCodes`; tenant `1806048000000-AddNetworkVisitors`.
 - **Database cost:**
@@ -2734,6 +2734,41 @@ A network is a **tree of churches** under one top church. Each church is still i
   - **Announcements:** one small write per branch when one is sent or changed, in the background.
   - **Events:** at most one re-copy per church a minute while it's being edited, plus one a night, each a delete and insert of its own rows.
   - **Reading:** member, admin and agenda reads are indexed root reads; nothing reads another branch's schema.
+
+**Network report, overview and attention list:** each church in a network has its figures counted per month into root table `network_rollups (tenant_id, period 'YYYY-MM')` with `network_root_id`, `metrics` jsonb, `attention` jsonb and `computed_at` (index `idx_network_rollups_root_period`). Oversight pages read only that table.
+- **Counting** (`NetworkRollupService.compute`): it runs inside the branch's own schema in one `REPEATABLE READ, READ ONLY` transaction, so the figures agree with each other. About 10 indexed queries, 30–70 ms locally.
+  - **Members:** members (active); new members (records created that month, minus moves in); stopped attending (active members whose last check-in, online or visit was 4–12 or 8–16 weeks ago, as of the count).
+  - **First-timers:** first-timers (`visited_on` in the month); came back once or twice (`first_timer_visits`); contacted within a week (a follow-up note within 7 days of the visit).
+  - **Across the network:** visitors in (`network_visitors`); visits out (`ATTENDED_ELSEWHERE` days).
+  - **Gatherings:** services held (slots ended that month with check-ins or a headcount); in-person check-ins; online confirmations; ratings (count and average).
+  - **Faith:** class completions.
+  - **Giving:** only when the branch shares it.
+  - **From root tables:** moves in and out (`network_transfers`, with new indexes `idx_network_transfers_done_to` and `_from`) and milestones the church recorded (`discuva_milestones.source_tenant_id`, new index `idx_discuva_milestones_source_created`).
+  - **Not counted yet:** attendance against seating (venues don't record capacity) and services that overran. Both are on the Later list.
+- **When it runs:**
+  - **On change:** `NetworkShareSubscriber` marks a branch when any of these change: attendance, members, first-timers and their visits, follow-up tasks and notes, ratings, class enrolments, headcounts, admins, visitors and service slots. The first mark books one delayed `network-copy` job (`kind: 'rollup'`, `jobId: rollup:<tenantId>`) after `network_rollup_wait_minutes` (platform setting, default 10, 2–60). Later marks inside that wait cost one Redis `SET NX` (`rollup-mark:<tenantId>`).
+  - **Nightly:** at 03:30 every networked church is queued too, which also joins one already booked.
+  - **Which months:** only the current month is recounted, plus last month until the 7th. After that last month is final.
+  - **Logging:** each run's duration is logged.
+- **Attention list** (current month only), using the network's own thresholds:
+  - attendance down by the set percentage over the set weeks against the weeks before (only with 20 or more earlier check-ins);
+  - the set number of first-timers with no contact after the set days;
+  - no check-in or headcount in the set weeks;
+  - the set share of last month's first-timers unreachable (from 5 first-timers);
+  - fewer active admins than the set minimum.
+- **Network settings:** root table `network_settings (network_root_id, settings jsonb)`. `GET /network/settings` (BRANCH_READ) returns `{ values, limits }`; `PUT /network/settings` (BRANCH_WRITE, owners of the top church only, 403 otherwise; 400 outside the platform limits) saves them, cached 10 min.
+  - **Defaults and limits:** attention drop 15% (5–50), weeks compared 6 (3–12), not contacted 5 (1–50) after 7 days (3–21), no service 3 weeks (2–8), unreachable 20% (5–80), fewest admins 2 (1–5).
+  - **Visit suggestion:** 4 visits (0–20) in 8 weeks (2–26). These replace the earlier platform settings `network_visit_suggest_*`.
+- **Reading:** `GET /network/report?month=YYYY-MM` (BRANCH_READ; default this month, any of the last 12) returns `{ period, periods, final, updatedAt, churches: [{ id, path, computedAt, figures, perHundred, attendancePerService, onlinePercent, contactedPercent }], totals, median, attention: [{ churchId, path, kind, detail }] }`. It covers the current church and everything under it.
+  - **Masking:** counts of people from 1 to 4 (in figures, totals and medians) come back as `"FEWER_THAN_5"`; per-100 figures are left out below 5.
+  - **Caching:** cached under `network-report:<churchId>:<period>:<version>`, where the version (`network-rollup-ver:<rootId>`) changes whenever any branch is recounted.
+  - **Portal:** Church Network → Report (sections Growing, Gatherings, Faith and Giving when shared; a per-100 toggle; totals and network median rows), and the Network settings card on Church Network.
+- **Monthly email:** on the 8th at 07:00 (`NetworkMonthlyReportScheduler`), owners of every church with an active branch under it get `network-monthly-report`: last month's totals for everything under them plus the current "Worth a look" items, sent from that church. It's checked against the switch per church. The cost is one root read per such church, once a month.
+- **Migrations:** root `1807209600000-AddNetworkRollups`; tenant `1806220800000-AddNetworkReportIndexes` (`idx_network_visitors_checkin`).
+- **Database cost:**
+  - **Per branch:** at most one recount per wait period (6 an hour at 10 minutes, none in a quiet week) plus one a night.
+  - **Each recount:** about 10 indexed reads in the branch, 3 in the root, and one upsert of one or two small rows.
+  - **Reading:** report pages are one indexed root read, cached until a figure changes.
 
 **Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
 
@@ -17083,7 +17118,7 @@ A network is a **tree of churches** under one top church. Each church is still i
 
 **Addresses for everyone else:** hyphens are kept for branch addresses. Sign-up, the sign-up live check (`GET /signup/subdomain-availability`) and console church creation accept only `^[a-z0-9]{1,63}$`. `checkSubdomain(sub, { allowHyphen: true })` is used only by the Network page. Existing hyphenated churches keep working as standalone.
 
-**Figures and giving:** `GET /branch/overview` (BRANCH_READ) lists the current church's direct branches with figures from `tenant_rollups`. Figures always reach the churches above; only giving is the branch's choice: `GET`/`PATCH /branch/giving-sharing` (`{ shareGivingWithParent }`). The overview and report are rebuilt in a later Phase 4 slice.
+**Giving sharing:** `GET`/`PATCH /branch/giving-sharing`. Figures now come from `GET /network/report` (see Church networks → Network report above).
 
 **Network app and home branches:**
 - **The app:** the member app installed from the top church's address is the network's app. It works as the person's home branch from that one address by holding that branch's sign-in and sending that branch's address in `X-Tenant-Subdomain` before sign-in. Requests after sign-in already take the church from the token.

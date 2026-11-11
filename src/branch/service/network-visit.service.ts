@@ -20,14 +20,13 @@ import { Member } from '../../member/entity/member.entity';
 import { AttendanceService } from '../../attendance/service/attendance.service';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { NetworkVenueService } from '../../venue/service/network-venue.service';
-import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
-import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { NetworkVisitCode } from '../entity/network-visit-code.entity';
 import { NetworkVisitor } from '../entity/network-visitor.entity';
 import { NetworkService } from './network.service';
+import { NetworkSettingsService } from './network-settings.service';
 
 // Close enough to a venue to offer checking in there; the check-in itself uses the service's own allowance.
 const NEARBY_METERS = 300;
@@ -78,7 +77,7 @@ export class NetworkVisitService {
     private readonly networkVenues: NetworkVenueService,
     private readonly memberService: MemberService,
     private readonly attendance: AttendanceService,
-    private readonly settings: PlatformSettingsService,
+    private readonly settings: NetworkSettingsService,
     private readonly timezone: ChurchTimezoneService,
     private readonly auditLog: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
@@ -137,7 +136,7 @@ export class NetworkVisitService {
     const [paths, homeDate, [threshold, weeks]] = await Promise.all([
       this.network.pathsOf(here.networkRootId!, [host.id, here.id]),
       this.localDateHere(),
-      this.suggestionRule(),
+      this.suggestionRule(here.networkRootId!),
     ]);
     const path = paths.get(host.id) ?? '';
 
@@ -368,11 +367,10 @@ export class NetworkVisitService {
     }).format(new Date());
   }
 
-  private suggestionRule(): Promise<[number, number]> {
-    return Promise.all([
-      this.settings.getNumber(PlatformSettingKey.NETWORK_VISIT_SUGGEST_VISITS),
-      this.settings.getNumber(PlatformSettingKey.NETWORK_VISIT_SUGGEST_WEEKS),
-    ]);
+  // The network's own numbers (Network settings), within the platform's range.
+  private async suggestionRule(rootId: string): Promise<[number, number]> {
+    const s = await this.settings.get(rootId);
+    return [s.visitSuggestVisits, s.visitSuggestWeeks];
   }
 
   private inChurch<T>(church: Church, fn: () => Promise<T>): Promise<T> {

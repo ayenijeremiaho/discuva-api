@@ -6,22 +6,23 @@ import {
   NetworkCopyJob,
 } from '../../network-share/network-share.constants';
 import { NetworkCopyService } from '../service/network-copy.service';
+import { NetworkRollupService } from '../service/network-rollup.service';
 
 @Processor(NETWORK_COPY_QUEUE)
 export class NetworkCopyProcessor {
   private readonly logger = new Logger(NetworkCopyProcessor.name);
 
-  constructor(private readonly copies: NetworkCopyService) {}
+  constructor(
+    private readonly copies: NetworkCopyService,
+    private readonly rollups: NetworkRollupService,
+  ) {}
 
   @Process()
   async handle(job: Job<NetworkCopyJob>): Promise<void> {
-    if (job.data.kind === 'events')
-      await this.copies.copyEvents(job.data.sourceTenantId);
-    else
-      await this.copies.copyAnnouncement(
-        job.data.sourceTenantId,
-        job.data.sourceId!,
-      );
+    const { kind, sourceTenantId, sourceId } = job.data;
+    if (kind === 'events') await this.copies.copyEvents(sourceTenantId);
+    else if (kind === 'rollup') await this.rollups.compute(sourceTenantId);
+    else await this.copies.copyAnnouncement(sourceTenantId, sourceId!);
   }
 
   @OnQueueFailed()

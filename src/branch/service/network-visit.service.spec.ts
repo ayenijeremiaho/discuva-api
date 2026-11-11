@@ -87,9 +87,10 @@ function setup(
     recordAttendedElsewhere: jest.fn().mockResolvedValue(1),
   };
   const settings = {
-    getNumber: jest.fn(async (k: string) =>
-      k.endsWith('visits') ? (over.threshold ?? 4) : 8,
-    ),
+    get: jest.fn(async () => ({
+      visitSuggestVisits: over.threshold ?? 4,
+      visitSuggestWeeks: 8,
+    })),
   };
   const timezone = { get: jest.fn().mockResolvedValue('Africa/Lagos') };
   const insertQb: any = {

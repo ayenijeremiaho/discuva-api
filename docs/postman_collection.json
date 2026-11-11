@@ -42161,32 +42161,6 @@
       "name": "Church Network (Admin)",
       "item": [
         {
-          "name": "Get Branches Overview",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/branch/overview",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "branch",
-                "overview"
-              ]
-            },
-            "description": "BRANCH_READ. This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent. No limit on branch count."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "[\n  {\n    \"tenantId\": \"uuid\",\n    \"name\": \"Branch Church\",\n    \"subdomain\": \"branchchurch\",\n    \"memberCount\": 120,\n    \"attendanceRate\": 78.5,\n    \"totalGiving\": 450000,\n    \"computedAt\": \"2026-08-08T03:00:00.000Z\",\n    \"sharingEnabled\": true,\n    \"givingShared\": false\n  }\n]"
-            }
-          ]
-        },
-        {
           "name": "Get Giving Sharing",
           "request": {
             "method": "GET",
@@ -43001,6 +42975,99 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"churches\": [\n    {\n      \"id\": \"uuid\",\n      \"path\": \"ABC\"\n    }\n  ],\n  \"events\": [\n    {\n      \"tenantId\": \"uuid\",\n      \"eventId\": \"uuid\",\n      \"name\": \"Network Convention\",\n      \"description\": \"Three days of worship\",\n      \"startTime\": \"2026-12-01T09:00:00.000Z\",\n      \"endTime\": \"2026-12-01T12:00:00.000Z\",\n      \"venueName\": \"Main Hall\",\n      \"serviceCount\": 1,\n      \"fromPath\": \"ABC\",\n      \"audience\": \"EVERYONE\",\n      \"shared\": true\n    }\n  ],\n  \"announcements\": [\n    {\n      \"id\": \"uuid\",\n      \"title\": \"Prayer week\",\n      \"publishedAt\": \"2026-11-30T08:00:00.000Z\",\n      \"fromPath\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Network Report (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/report?month=2026-11",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "report"
+              ],
+              "query": [
+                {
+                  "key": "month",
+                  "value": "2026-11"
+                }
+              ]
+            },
+            "description": "BRANCH_READ. This month by default (the overview) or any of the last 12 months, for the current church and everything under it. Counts of 1–4 people come back as FEWER_THAN_5."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"period\": \"2026-11\",\n  \"periods\": [\n    \"2026-11\",\n    \"2026-10\"\n  ],\n  \"final\": false,\n  \"updatedAt\": \"2026-11-11T10:42:00.000Z\",\n  \"churches\": [\n    {\n      \"id\": \"uuid\",\n      \"path\": \"ABC · Ikeja\",\n      \"computedAt\": \"2026-11-11T10:42:00.000Z\",\n      \"figures\": {\n        \"members\": 420,\n        \"newMembers\": 12,\n        \"firstTimers\": \"FEWER_THAN_5\",\n        \"giving\": null\n      },\n      \"perHundred\": {\n        \"newMembers\": 2.9\n      },\n      \"attendancePerService\": 120,\n      \"onlinePercent\": 9,\n      \"contactedPercent\": 75\n    }\n  ],\n  \"totals\": {\n    \"members\": 420,\n    \"newMembers\": 12,\n    \"firstTimers\": \"FEWER_THAN_5\",\n    \"giving\": null\n  },\n  \"median\": {\n    \"members\": 180\n  },\n  \"attention\": [\n    {\n      \"churchId\": \"uuid\",\n      \"path\": \"ABC · Ikeja\",\n      \"kind\": \"FEW_ADMINS\",\n      \"detail\": \"Only one admin looks after this branch.\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Network Settings (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "settings"
+              ]
+            },
+            "description": "BRANCH_READ. The network's attention thresholds and visit suggestion, with the platform's limits."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"values\": {\n    \"attendanceDropPercent\": 15,\n    \"noServiceWeeks\": 3,\n    \"visitSuggestVisits\": 4\n  },\n  \"limits\": {\n    \"attendanceDropPercent\": {\n      \"default\": 15,\n      \"min\": 5,\n      \"max\": 50,\n      \"label\": \"Attendance drop (%)\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Network Settings (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "settings"
+              ]
+            },
+            "description": "BRANCH_WRITE, owners of the top church only. Any subset; each within its limits.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"noServiceWeeks\": 4\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"values\": {\n    \"noServiceWeeks\": 4\n  }\n}"
             }
           ]
         }

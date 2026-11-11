@@ -26,11 +26,6 @@ describe('BranchController', () => {
     controller = module.get(BranchController);
   });
 
-  it('getOverview delegates to BranchRollupService', () => {
-    controller.getOverview();
-    expect(mockBranchRollupService.getOverview).toHaveBeenCalled();
-  });
-
   it('reads and sets whether giving is shared', () => {
     controller.getGivingSharing();
     controller.setGivingSharing({ shareGivingWithParent: true });
