@@ -11602,9 +11602,10 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
-- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile}`: whether One Discuva sign-in
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile, network, inNetwork}`: whether One Discuva sign-in
   and Global Profile are on for this church, so the app shows email-first joining instead of the old sign-up and gates
-  the Phase 3 screens); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
+  the Phase 3 screens; `network` = Church networks on here, `inNetwork` = on and this church is in one, used to show
+  Phase 4 release notes); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
   detailsToConfirm, deletesOn}`; the last four are Phase 3, below); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
   portal sessions at every linked church, this one included). The admin member list and detail carry
   `hasDiscuvaAccount`, so the portal offers Recover account only for those members.
@@ -14318,9 +14319,10 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
-- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile}`: whether One Discuva sign-in
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile, network, inNetwork}`: whether One Discuva sign-in
   and Global Profile are on for this church, so the app shows email-first joining instead of the old sign-up and gates
-  the Phase 3 screens); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
+  the Phase 3 screens; `network` = Church networks on here, `inNetwork` = on and this church is in one, used to show
+  Phase 4 release notes); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
   detailsToConfirm, deletesOn}`; the last four are Phase 3, below); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
   portal sessions at every linked church, this one included). The admin member list and detail carry
   `hasDiscuvaAccount`, so the portal offers Recover account only for those members.

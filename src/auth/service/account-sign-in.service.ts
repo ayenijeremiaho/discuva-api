@@ -1,3 +1,5 @@
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+import { NetworkShareService } from '../../network-share/network-share.service';
 import {
   BadRequestException,
   ConflictException,
@@ -88,6 +90,7 @@ export class AccountSignInService {
     private readonly deletion: AccountDeletionService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    private readonly networkShare: NetworkShareService,
   ) {}
 
   // Sent either way, so the reply never says whether someone has an account or belongs here.
@@ -464,12 +467,21 @@ export class AccountSignInService {
     return this.memberService.getByIdWithCredentials(user.id);
   }
 
-  async available(): Promise<{ available: boolean; profile: boolean }> {
-    const [available, profile] = await Promise.all([
+  // Which switches are on for this church; the apps use them to show features and their release notes.
+  async available(): Promise<{
+    available: boolean;
+    profile: boolean;
+    network: boolean;
+    inNetwork: boolean;
+  }> {
+    const tenantId = this.cls.get('tenantId');
+    const [available, profile, network, rootId] = await Promise.all([
       this.accounts.isOn(),
       this.accounts.isProfileOn(),
+      this.accounts.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE),
+      tenantId ? this.networkShare.networkRootOf(tenantId) : null,
     ]);
-    return { available, profile };
+    return { available, profile, network, inNetwork: network && !!rootId };
   }
 
   // What the member app shows on Account and after sign-in.

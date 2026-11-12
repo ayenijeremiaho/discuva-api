@@ -1,3 +1,4 @@
+import { NetworkShareService } from '../../network-share/network-share.service';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -33,10 +34,12 @@ const codes = {
   sendCode: jest.fn().mockResolvedValue(undefined),
   verifyCode: jest.fn().mockResolvedValue(undefined),
 };
+const networkShare = { networkRootOf: jest.fn().mockResolvedValue(null) };
 const accounts = {
   homeIn: jest.fn(),
   isOn: jest.fn(),
   isProfileOn: jest.fn().mockResolvedValue(false),
+  readModeOn: jest.fn().mockResolvedValue(false),
   linkHere: jest.fn(),
   recordConsent: jest.fn(),
   accountFor: jest.fn(),
@@ -109,6 +112,7 @@ describe('AccountSignInService', () => {
         { provide: PlatformSettingsService, useValue: settings },
         { provide: ClsService, useValue: cls },
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
+        { provide: NetworkShareService, useValue: networkShare },
       ],
     }).compile();
     service = module.get(AccountSignInService);
@@ -127,7 +131,18 @@ describe('AccountSignInService', () => {
     await expect(service.available()).resolves.toEqual({
       available: true,
       profile: false,
+      network: false,
+      inNetwork: false,
     });
+  });
+
+  it('says whether church networks are on here, and whether this church is in one', async () => {
+    accounts.isOn.mockResolvedValue(true);
+    accounts.readModeOn.mockResolvedValueOnce(true);
+    networkShare.networkRootOf.mockResolvedValueOnce('root-1');
+    await expect(service.available()).resolves.toEqual(
+      expect.objectContaining({ network: true, inNetwork: true }),
+    );
   });
 
   describe('joining a church', () => {
