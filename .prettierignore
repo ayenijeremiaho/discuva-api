@@ -1,1 +1,3 @@
 src/bible-games/data/*.json
+# Migrations are immutable once committed; never reformat them.
+src/migrations/
