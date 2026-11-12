@@ -720,6 +720,16 @@ describe('ServiceProgrammeService', () => {
   });
 
   describe('getUpcomingForMembers', () => {
+    it('builds a filter Postgres can parse: brackets balanced', async () => {
+      await service.getUpcomingForMembers();
+      const where = mockProgrammeQueryBuilder.where.mock.calls.at(
+        -1,
+      )?.[0] as string;
+      const opens = (where.match(/\(/g) ?? []).length;
+      const closes = (where.match(/\)/g) ?? []).length;
+      expect(opens).toBe(closes);
+    });
+
     it('returns the programme mapped to member-safe slot views (speaker/backup names only)', async () => {
       mockProgrammeQueryBuilder.getOne.mockResolvedValueOnce({
         id: 'prog-1',
