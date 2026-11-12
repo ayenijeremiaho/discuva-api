@@ -23,6 +23,7 @@ describe('NetworkOverseerService', () => {
   };
   const network = {
     pathsOf: jest.fn().mockResolvedValue(new Map([['b1', 'ABC · Ikeja']])),
+    isAvailable: jest.fn().mockResolvedValue(true),
   };
   const audit = { log: jest.fn() };
   let here = 'root';
@@ -195,5 +196,13 @@ describe('NetworkOverseerService', () => {
     await expect(service.pass(plain, 'elsewhere')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('stays shut while church networks are switched off', async () => {
+    network.isAvailable.mockResolvedValueOnce(false);
+    await expect(service.pass(plain, 'b1')).rejects.toThrow(
+      'Church networks are not available yet.',
+    );
+    expect(access.issuePass).not.toHaveBeenCalled();
   });
 });

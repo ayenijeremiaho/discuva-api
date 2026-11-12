@@ -221,6 +221,8 @@ export class NetworkOverseerService {
   }
 
   private async here(): Promise<Tenant> {
+    if (!(await this.network.isAvailable()))
+      throw new NotFoundException('Church networks are not available yet.');
     const here = await this.tenants.findOne({
       where: { id: this.cls.get('tenantId') },
       select: { id: true, networkRootId: true },
