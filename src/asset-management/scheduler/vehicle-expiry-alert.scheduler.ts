@@ -22,8 +22,7 @@ interface ExpiryConfig {
   expiryField: 'insuranceExpiry' | 'roadworthinessExpiry';
   label: string;
   notifiedField:
-    | 'insuranceNotifiedThresholds'
-    | 'roadworthinessNotifiedThresholds';
+    'insuranceNotifiedThresholds' | 'roadworthinessNotifiedThresholds';
 }
 
 const EXPIRY_CONFIGS: ExpiryConfig[] = [

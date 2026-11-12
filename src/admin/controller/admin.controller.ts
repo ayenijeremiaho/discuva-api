@@ -1,3 +1,8 @@
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { OpenToOverseers } from '../../network-overseer/open-to-overseers.decorator';
 import {
   Body,
@@ -30,7 +35,12 @@ import { UpdateAppearanceModeDto } from '../../member/dto/update-appearance-mode
 @UseGuards(AdminGuard)
 @Controller('admin/users')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
+    private readonly cls: ClsService<AppClsStore>,
+  ) {}
 
   @RequiresPermission(AdminPermission.ADMIN_READ)
   @Get()
@@ -40,9 +50,22 @@ export class AdminController {
 
   @OpenToOverseers()
   @Get('me')
-  getMe(@CurrentAdmin() admin: Admin & { overseer?: boolean }) {
+  async getMe(@CurrentAdmin() admin: Admin & { overseer?: boolean }) {
     if (admin.overseer) return admin;
-    return this.adminService.getMyProfile(admin.id);
+    const me = await this.adminService.getMyProfile(admin.id);
+    // A closed branch is read-only, so its admins' portal shows read permissions only.
+    const closed = await this.tenantRepo.exists({
+      where: { id: this.cls.get('tenantId'), closedAt: Not(IsNull()) },
+    });
+    if (closed && me.adminRole) {
+      me.adminRole = {
+        ...me.adminRole,
+        permissions: me.adminRole.permissions.filter((p) =>
+          p.endsWith(':read'),
+        ),
+      };
+    }
+    return me;
   }
 
   @Patch('me/appearance')
