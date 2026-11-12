@@ -25,6 +25,7 @@ const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
+  delGlobal: jest.fn().mockResolvedValue(1),
   key: jest.fn().mockReturnValue('cache-key'),
 };
 const mockAuditLogService = { log: jest.fn() };
@@ -104,6 +105,9 @@ describe('TenantProfileService', () => {
     expect(mockTenantRepository.save).toHaveBeenCalledWith(result);
     expect(mockCacheService.del).toHaveBeenCalledWith(
       'tenant-branding:tenant-1',
+    );
+    expect(mockCacheService.delGlobal).toHaveBeenCalledWith(
+      'church-tz:tenant-1',
     );
     expect(mockAuditLogService.log).toHaveBeenCalledTimes(1);
     expect(mockAuditLogService.log).toHaveBeenCalledWith(

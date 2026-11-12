@@ -5,19 +5,20 @@ import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { CacheService } from './cache.service';
 
-const TTL_MS = 10 * 60_000;
+const TTL_SECONDS = 10 * 60;
+export const churchTimezoneKey = (tenantId: string) => `church-tz:${tenantId}`;
 
 // The current church's timezone (falls back to TIMEZONE), so series land on the right local day and time.
 @Injectable()
 export class ChurchTimezoneService {
-  private readonly cache = new Map<string, { tz: string; at: number }>();
-
   constructor(
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
     private readonly cls: ClsService<AppClsStore>,
     private readonly config: ConfigService,
+    private readonly cache: CacheService,
   ) {}
 
   get fallback(): string {
@@ -27,14 +28,15 @@ export class ChurchTimezoneService {
   async get(): Promise<string> {
     const tenantId = this.cls.get('tenantId');
     if (!tenantId) return this.fallback;
-    const hit = this.cache.get(tenantId);
-    if (hit && Date.now() - hit.at < TTL_MS) return hit.tz;
+    // Shared across API machines, and cleared when the church changes its timezone.
+    const hit = await this.cache.getGlobal<string>(churchTimezoneKey(tenantId));
+    if (hit) return hit;
     const tenant = await this.tenantRepo.findOne({
       where: { id: tenantId },
       select: { id: true, timezone: true },
     });
     const tz = tenant?.timezone || this.fallback;
-    this.cache.set(tenantId, { tz, at: Date.now() });
+    this.cache.setGlobal(churchTimezoneKey(tenantId), tz, TTL_SECONDS);
     return tz;
   }
 }

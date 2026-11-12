@@ -1,3 +1,4 @@
+import { churchTimezoneKey } from '../../utility/service/church-timezone.service';
 import {
   BadRequestException,
   Injectable,
@@ -79,6 +80,7 @@ export class TenantProfileService {
   // A top church's logo and theme show in all its branches, so their cached branding goes too.
   clearBranding(tenant: Pick<Tenant, 'id' | 'networkRootId'>): void {
     this.cacheService.del(`tenant-branding:${tenant.id}`);
+    this.cacheService.delGlobal(churchTimezoneKey(tenant.id));
     if (tenant.networkRootId !== tenant.id) return;
     this.tenantRepository
       .find({ where: { networkRootId: tenant.id }, select: { id: true } })

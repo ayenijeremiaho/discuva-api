@@ -88,7 +88,16 @@ export class GameSessionGateway implements OnGatewayInit, OnGatewayConnection {
   // Tenant repo. Never rejects the connection either way — an
   // unresolvable tenant just means handleJoin below has nothing to join
   // and reports that as a failed ack there, not at the transport level.
-  async handleConnection(client: Socket): Promise<void> {
+  // A join can arrive before the church lookup below finishes; it waits for it.
+  private readonly identified = new WeakMap<Socket, Promise<void>>();
+
+  handleConnection(client: Socket): Promise<void> {
+    const ready = this.identify(client);
+    this.identified.set(client, ready);
+    return ready;
+  }
+
+  private async identify(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token as string | undefined;
     const tenantSubdomain = client.handshake.auth?.tenantSubdomain as
       string | undefined;
@@ -153,6 +162,7 @@ export class GameSessionGateway implements OnGatewayInit, OnGatewayConnection {
     if (!payload?.sessionCode) {
       return { ok: false, message: 'Missing session code' };
     }
+    await this.identified.get(client);
     const tenantId = client.data.tenantId as string | undefined;
     const schemaName = client.data.schemaName as string | undefined;
     if (!tenantId || !schemaName) {

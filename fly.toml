@@ -40,6 +40,7 @@ kill_timeout = "10s"
   NODE_ENV = "production"
   PORT = "3000"
 
+# Two machines from Phase 4 on: set once with `flyctl scale count 2 -a discuva-api` (this file doesn't set the count).
 [http_service]
   internal_port = 3000
   force_https = true

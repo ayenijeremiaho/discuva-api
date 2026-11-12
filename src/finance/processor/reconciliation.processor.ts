@@ -1,5 +1,5 @@
 import * as crypto from 'node:crypto';
-import { Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import {
   OnQueueFailed,
   OnQueueStalled,
@@ -32,7 +32,7 @@ export interface ReconciliationJobData extends TenantJobEnvelope {
 }
 
 @Processor(RECONCILIATION_QUEUE)
-export class ReconciliationProcessor implements OnApplicationBootstrap {
+export class ReconciliationProcessor {
   private readonly logger = new Logger(ReconciliationProcessor.name);
 
   constructor(
@@ -140,24 +140,6 @@ export class ReconciliationProcessor implements OnApplicationBootstrap {
         errorMessage: (err as Error).message,
       });
       throw err;
-    }
-  }
-
-  async onApplicationBootstrap(): Promise<void> {
-    const stuck = await this.jobRepo.count({
-      where: { status: BulkUploadJobStatus.PARSING },
-    });
-    if (stuck > 0) {
-      await this.jobRepo.update(
-        { status: BulkUploadJobStatus.PARSING },
-        {
-          status: BulkUploadJobStatus.FAILED,
-          errorMessage: 'Interrupted — service restarted',
-        },
-      );
-      this.logger.warn(
-        `Reset ${stuck} stuck PARSING reconciliation job(s) to FAILED on startup`,
-      );
     }
   }
 

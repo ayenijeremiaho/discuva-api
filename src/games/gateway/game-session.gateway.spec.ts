@@ -111,6 +111,27 @@ describe('GameSessionGateway', () => {
   });
 
   describe('handleJoin', () => {
+    it('waits for the church lookup when the join arrives first, as a screen does on connect', async () => {
+      mockClient.handshake.auth = { tenantSubdomain: 'frontend-test' };
+      let found!: (t: unknown) => void;
+      mockTenantRepo.findOneBy.mockReturnValueOnce(
+        new Promise((r) => (found = r)),
+      );
+      mockGameService.getSessionState.mockResolvedValueOnce({ status: 'LIVE' });
+
+      void gateway.handleConnection(mockClient as any);
+      const ack = gateway.handleJoin(
+        { sessionCode: 'GAME-1' },
+        mockClient as any,
+      );
+      found({ id: 'tenant-3', schemaName: 'schema_3' });
+
+      await expect(ack).resolves.toEqual(expect.objectContaining({ ok: true }));
+      expect(mockClient.join).toHaveBeenCalledWith(
+        'game-session:tenant-3:GAME-1',
+      );
+    });
+
     it('joins the tenant-scoped room and resolves the ack with the already-fetched state', async () => {
       mockClient.data = { tenantId: 'tenant-1', schemaName: 'schema_1' };
       const state = { sessionCode: 'GAME-ABC123', status: 'LIVE' };

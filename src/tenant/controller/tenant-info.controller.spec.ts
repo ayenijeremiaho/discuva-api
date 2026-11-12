@@ -34,6 +34,7 @@ const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
+  delGlobal: jest.fn().mockResolvedValue(1),
   key: jest.fn().mockReturnValue('cache-key'),
 };
 

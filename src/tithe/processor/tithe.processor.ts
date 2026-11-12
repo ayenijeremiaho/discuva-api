@@ -1,4 +1,4 @@
-import { Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import {
   OnQueueFailed,
   OnQueueStalled,
@@ -40,7 +40,7 @@ export interface TitheRow {
 }
 
 @Processor(TITHE_QUEUE)
-export class TitheProcessor implements OnApplicationBootstrap {
+export class TitheProcessor {
   private readonly logger = new Logger(TitheProcessor.name);
 
   constructor(
@@ -171,24 +171,6 @@ export class TitheProcessor implements OnApplicationBootstrap {
         processedAt: new Date(),
       });
       throw err;
-    }
-  }
-
-  async onApplicationBootstrap(): Promise<void> {
-    const stuck = await this.batchRepo.count({
-      where: { status: TitheBatchStatus.PROCESSING },
-    });
-    if (stuck > 0) {
-      await this.batchRepo.update(
-        { status: TitheBatchStatus.PROCESSING },
-        {
-          status: TitheBatchStatus.FAILED,
-          errorMessage: 'Interrupted — service restarted',
-        },
-      );
-      this.logger.warn(
-        `Reset ${stuck} stuck PROCESSING batch(es) to FAILED on startup`,
-      );
     }
   }
 
