@@ -52,6 +52,7 @@ function setup(over: { children?: string[]; existing?: boolean } = {}) {
     })),
     findOne: jest.fn(),
     find: jest.fn().mockResolvedValue([]),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const tenantRepo = {
     findOne: jest.fn(async ({ where }) =>
@@ -211,7 +212,8 @@ describe('NetworkClosureService', () => {
       status: BranchClosureStatus.SCHEDULED,
     });
     await t.service.cancel(owner, 'm1', 'cl1');
-    expect(t.closureRepo.save).toHaveBeenCalledWith(
+    expect(t.closureRepo.update).toHaveBeenCalledWith(
+      { id: 'cl1', status: BranchClosureStatus.SCHEDULED },
       expect.objectContaining({ status: BranchClosureStatus.CANCELLED }),
     );
     expect(t.queue.getJob).toHaveBeenCalledWith('closure:cl1');
@@ -220,6 +222,20 @@ describe('NetworkClosureService', () => {
       expect.any(String),
       'm1',
     );
+  });
+
+  it("can't be cancelled once the day has started it", async () => {
+    const t = setup();
+    t.closureRepo.findOne.mockResolvedValue({
+      id: 'cl1',
+      tenantId: 'lekki',
+      status: BranchClosureStatus.SCHEDULED,
+    });
+    t.closureRepo.update.mockResolvedValueOnce({ affected: 0 });
+    await expect(t.service.cancel(owner, 'm1', 'cl1')).rejects.toThrow(
+      'already closing',
+    );
+    expect(t.announcements.createSystemAnnouncement).not.toHaveBeenCalled();
   });
 
   it('does nothing for a closing that was cancelled or already ran', async () => {

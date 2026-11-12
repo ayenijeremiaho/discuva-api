@@ -312,7 +312,11 @@ describe('NetworkTransferService', () => {
       toTenantId: THERE,
     });
     await t.service.decline('r-1', 'admin-1', ' Finish the quarter first ');
-    expect(t.transferRepo.save).toHaveBeenCalledWith(
+    expect(t.transferRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'r-1',
+        status: NetworkTransferStatus.PENDING,
+      }),
       expect.objectContaining({
         status: NetworkTransferStatus.DECLINED,
         declineReason: 'Finish the quarter first',
@@ -325,6 +329,26 @@ describe('NetworkTransferService', () => {
       'network-transfer-declined',
       expect.objectContaining({ note: 'Finish the quarter first' }),
     );
+  });
+
+  it('lets only the first of two admins decide a request', async () => {
+    const t = setup();
+    t.transferRepo.findOne.mockResolvedValue({
+      id: 'r-1',
+      fromMemberId: 'm-1',
+      accountId: 'acc-1',
+      networkRootId: ROOT,
+      toTenantId: THERE,
+    });
+    t.transferRepo.update.mockResolvedValueOnce({ affected: 0 });
+    await expect(t.service.release('r-1', 'admin-2')).rejects.toThrow(
+      'This request was already handled.',
+    );
+    t.transferRepo.update.mockResolvedValueOnce({ affected: 0 });
+    await expect(t.service.decline('r-1', 'admin-2')).rejects.toThrow(
+      'This request was already handled.',
+    );
+    expect(t.utility.sendEmailWithTemplate).not.toHaveBeenCalled();
   });
 
   it('moves a worker at once when their branch is closing, with nobody left to release them', async () => {
