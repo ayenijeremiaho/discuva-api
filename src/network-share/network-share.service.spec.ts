@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { NetworkShareService, networkRootKey } from './network-share.service';
 
-function setup(root: string | null, hasBranches = true) {
+function setup(root: string | null, hasBranches = true, networksOn = true) {
+  const accounts = { readModeOn: jest.fn().mockResolvedValue(networksOn) };
   const tenantRepo = {
     findOne: jest.fn().mockResolvedValue({ id: 't1', networkRootId: root }),
     exists: jest.fn().mockResolvedValue(hasBranches),
@@ -22,6 +23,7 @@ function setup(root: string | null, hasBranches = true) {
       cache as never,
       cls as never,
       platformSettings as never,
+      accounts as never,
     ),
     queue,
     cache,
@@ -67,6 +69,12 @@ describe('NetworkShareService', () => {
     await expect(
       setup('root', true).service.assertCanShare(),
     ).resolves.toBeUndefined();
+  });
+
+  it("doesn't send to branches while church networks are switched off", async () => {
+    await expect(
+      setup('root', true, false).service.assertCanShare(),
+    ).rejects.toThrow('Church networks are not available yet.');
   });
 
   it('books one report recalculation after the wait, and later changes in that wait cost one Redis check', async () => {

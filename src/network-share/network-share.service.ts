@@ -1,3 +1,4 @@
+import { DiscuvaAccountService } from '../discuva-account/service/discuva-account.service';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bull';
@@ -28,9 +29,15 @@ export class NetworkShareService {
     private readonly cache: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly platformSettings: PlatformSettingsService,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   async assertCanShare(): Promise<void> {
+    if (
+      !(await this.accounts.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE))
+    ) {
+      throw new BadRequestException('Church networks are not available yet.');
+    }
     const hasBranches = await this.tenantRepo.exists({
       where: { parentTenantId: this.cls.get('tenantId'), isActive: true },
     });

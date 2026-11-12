@@ -236,9 +236,15 @@ export class NetworkClosureService {
     ) {
       throw new NotFoundException('No closing date to cancel there.');
     }
-    closure.status = BranchClosureStatus.CANCELLED;
-    closure.finishedAt = new Date();
-    await this.closureRepo.save(closure);
+    const { affected } = await this.closureRepo.update(
+      { id: closure.id, status: BranchClosureStatus.SCHEDULED },
+      { status: BranchClosureStatus.CANCELLED, finishedAt: new Date() },
+    );
+    if (!affected) {
+      throw new ConflictException(
+        "It's already closing, so it can't be cancelled now.",
+      );
+    }
     await (await this.queue.getJob(`closure:${closure.id}`))?.remove();
     const church = await this.church(closure.tenantId);
     const path =
@@ -329,8 +335,15 @@ export class NetworkClosureService {
       );
       return;
     }
-    closure.status = BranchClosureStatus.RUNNING;
-    await this.closureRepo.save(closure);
+    // Cancel and the day itself can't both win: whichever changes SCHEDULED first goes ahead.
+    if (closure.status === BranchClosureStatus.SCHEDULED) {
+      const { affected } = await this.closureRepo.update(
+        { id: closure.id, status: BranchClosureStatus.SCHEDULED },
+        { status: BranchClosureStatus.RUNNING },
+      );
+      if (!affected) return;
+      closure.status = BranchClosureStatus.RUNNING;
+    }
     const started = Date.now();
     const rules = await this.settings.get(closure.networkRootId);
     const paths = await this.network.pathsOf(closure.networkRootId, [

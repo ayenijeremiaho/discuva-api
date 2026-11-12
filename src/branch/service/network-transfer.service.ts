@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -68,6 +68,8 @@ export interface TransferRequestRow {
 }
 
 // Moving a member's home to another branch of the same network (Phase 4, decision 7).
+const HANDLED = 'This request was already handled.';
+
 @Injectable()
 export class NetworkTransferService {
   constructor(
@@ -211,6 +213,7 @@ export class NetworkTransferService {
         fromMemberId: memberId,
         fromTenantId: this.tenantId(),
         status: NetworkTransferStatus.PENDING,
+        decidedAt: IsNull(),
       },
       { status: NetworkTransferStatus.CANCELLED, decidedAt: new Date() },
     );
@@ -254,7 +257,16 @@ export class NetworkTransferService {
     if (transfer.fromMemberId === actorMemberId) {
       throw new ForbiddenException('Another admin needs to release you.');
     }
-    await this.execute(transfer, actorMemberId);
+    await this.claim(transfer.id);
+    try {
+      await this.execute(transfer, actorMemberId);
+    } catch (err) {
+      await this.transferRepo.update(
+        { id: transfer.id, status: NetworkTransferStatus.PENDING },
+        { decidedAt: null },
+      );
+      throw err;
+    }
     this.auditLog.log('TRANSFER_RELEASED', {
       actorId: actorMemberId,
       targetId: transfer.fromMemberId,
@@ -271,7 +283,20 @@ export class NetworkTransferService {
     transfer.decidedAt = new Date();
     transfer.decidedByMemberId = actorMemberId;
     transfer.declineReason = reason?.trim() || null;
-    await this.transferRepo.save(transfer);
+    const { affected } = await this.transferRepo.update(
+      {
+        id: transfer.id,
+        status: NetworkTransferStatus.PENDING,
+        decidedAt: IsNull(),
+      },
+      {
+        status: transfer.status,
+        decidedAt: transfer.decidedAt,
+        decidedByMemberId: actorMemberId,
+        declineReason: transfer.declineReason,
+      },
+    );
+    if (!affected) throw new ConflictException(HANDLED);
     this.auditLog.log('TRANSFER_DECLINED', {
       actorId: actorMemberId,
       targetId: transfer.fromMemberId,
@@ -489,16 +514,25 @@ export class NetworkTransferService {
     });
   }
 
+  // Only one decision per request, even with two admins on two machines: the first to mark it goes ahead.
+  private async claim(id: string): Promise<void> {
+    const { affected } = await this.transferRepo.update(
+      { id, status: NetworkTransferStatus.PENDING, decidedAt: IsNull() },
+      { decidedAt: new Date() },
+    );
+    if (!affected) throw new ConflictException(HANDLED);
+  }
+
   private async pendingHereById(id: string): Promise<NetworkTransfer> {
     const transfer = await this.transferRepo.findOne({
       where: {
         id,
         fromTenantId: this.tenantId(),
         status: NetworkTransferStatus.PENDING,
+        decidedAt: IsNull(),
       },
     });
-    if (!transfer)
-      throw new NotFoundException('This request was already handled.');
+    if (!transfer) throw new NotFoundException(HANDLED);
     return transfer;
   }
 
