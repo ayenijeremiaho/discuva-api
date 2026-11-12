@@ -1,3 +1,4 @@
+import { OpenToOverseers } from '../../network-overseer/open-to-overseers.decorator';
 import {
   Body,
   Controller,
@@ -37,8 +38,10 @@ export class AdminController {
     return this.adminService.getAll();
   }
 
+  @OpenToOverseers()
   @Get('me')
-  getMe(@CurrentAdmin() admin: Admin) {
+  getMe(@CurrentAdmin() admin: Admin & { overseer?: boolean }) {
+    if (admin.overseer) return admin;
     return this.adminService.getMyProfile(admin.id);
   }
 

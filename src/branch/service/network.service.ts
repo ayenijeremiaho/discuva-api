@@ -1,3 +1,4 @@
+import { NetworkOverseer } from '../../network-overseer/network-overseer.entity';
 import {
   BadRequestException,
   ConflictException,
@@ -139,6 +140,8 @@ export class NetworkService {
     private readonly networkShare: NetworkShareService,
     @InjectRepository(BranchClosure)
     private readonly closureRepo: Repository<BranchClosure>,
+    @InjectRepository(NetworkOverseer)
+    private readonly overseerRepo: Repository<NetworkOverseer>,
   ) {}
 
   isAvailable(): Promise<boolean> {
@@ -492,6 +495,7 @@ export class NetworkService {
       closesOn: string;
       status: string;
     }[];
+    overseers: { name: string; since: Date }[];
   }> {
     const [tree, levels, maxLevels] = await Promise.all([
       this.loadTree(rootId),
@@ -501,7 +505,7 @@ export class NetworkService {
     if (!tree.byId.has(rootId))
       throw new NotFoundException('Network not found');
     const ids = this.subtreeIds(tree, rootId);
-    const [rollups, moves, closures] = await Promise.all([
+    const [rollups, moves, closures, overseers] = await Promise.all([
       this.rollupRepo.find({
         where: { tenantId: In(ids) },
         select: { tenantId: true, memberCount: true },
@@ -515,6 +519,11 @@ export class NetworkService {
         where: { networkRootId: rootId },
         order: { createdAt: 'DESC' },
         take: 20,
+      }),
+      this.overseerRepo.find({
+        where: { networkRootId: rootId },
+        select: { name: true, createdAt: true },
+        order: { createdAt: 'ASC' },
       }),
     ]);
     const members = new Map(rollups.map((r) => [r.tenantId, r.memberCount]));
@@ -538,6 +547,7 @@ export class NetworkService {
         closesOn: c.closesOn,
         status: c.status,
       })),
+      overseers: overseers.map((o) => ({ name: o.name, since: o.createdAt })),
     };
   }
 

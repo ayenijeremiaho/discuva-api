@@ -81,6 +81,7 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { CommunicationProviderModule } from './communication-provider/communication-provider.module';
 import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
 import { NetworkShareModule } from './network-share/network-share.module';
+import { NetworkOverseerModule } from './network-overseer/network-overseer.module';
 import { BranchModule } from './branch/branch.module';
 import { FormsModule } from './forms/forms.module';
 import { PagesModule } from './pages/pages.module';
@@ -261,6 +262,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     GivingCheckoutModule,
     BranchModule,
     NetworkShareModule,
+    NetworkOverseerModule,
     FormsModule,
     PagesModule,
     ChurchCalendarModule,

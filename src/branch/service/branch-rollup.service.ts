@@ -1,3 +1,4 @@
+import { overseerBranchKey } from '../../network-overseer/overseer.constants';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -78,6 +79,7 @@ export class BranchRollupService {
     await this.tenantRepo.update(this.currentTenantId(), {
       shareGivingWithParent,
     });
+    this.cacheService.delGlobal(overseerBranchKey(this.currentTenantId()));
     return { shareGivingWithParent };
   }
 

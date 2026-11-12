@@ -1,3 +1,4 @@
+import { NetworkOverseer } from '../network-overseer/network-overseer.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
@@ -56,6 +57,8 @@ import { PublicNetworkController } from './controller/public-network.controller'
 import { TenantModule } from '../tenant/tenant.module';
 import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
 import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
+import { NetworkOverseerController } from './controller/network-overseer.controller';
+import { NetworkOverseerService } from './service/network-overseer.service';
 
 @Module({
   imports: [
@@ -71,6 +74,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
       NetworkRollup,
       BranchClosure,
       NetworkSettings,
+      NetworkOverseer,
       TenantRollup,
       Subscription,
     ]),
@@ -110,6 +114,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     NetworkEventsController,
     NetworkReportController,
     NetworkClosureController,
+    NetworkOverseerController,
   ],
   providers: [
     BranchRollupService,
@@ -123,6 +128,7 @@ import { NetworkEventsScheduler } from './scheduler/network-events.scheduler';
     NetworkReportService,
     NetworkClosureService,
     NetworkSettingsService,
+    NetworkOverseerService,
     NetworkMonthlyReportScheduler,
     NetworkCopyProcessor,
     BranchRollupScheduler,

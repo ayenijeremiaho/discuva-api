@@ -43158,6 +43158,136 @@
               "body": ""
             }
           ]
+        },
+        {
+          "name": "Network Overseers (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/overseers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "overseers"
+              ]
+            },
+            "description": "BRANCH_READ. Who may look inside the network's branches, read-only. Works at any church in the network; candidates are filled for the top church's owners only."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"overseers\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"Ada Obi\",\n      \"email\": \"ada@example.com\",\n      \"addedByName\": \"Olu Ade\",\n      \"createdAt\": \"2026-11-12T09:00:00.000Z\"\n    }\n  ],\n  \"max\": 5,\n  \"youAreOverseer\": false,\n  \"canManage\": true,\n  \"candidates\": [\n    {\n      \"adminId\": \"uuid\",\n      \"name\": \"Tobi Lawal\",\n      \"email\": \"tobi@example.com\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Name Overseer (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/overseers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "overseers"
+              ]
+            },
+            "description": "BRANCH_WRITE, owners of the top church. Names one of its active admins; at most 5. 409 if already named.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminId\": \"uuid\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"overseers\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"Ada Obi\",\n      \"email\": \"ada@example.com\",\n      \"addedByName\": \"Olu Ade\",\n      \"createdAt\": \"2026-11-12T09:00:00.000Z\"\n    }\n  ],\n  \"max\": 5,\n  \"youAreOverseer\": false,\n  \"canManage\": true,\n  \"candidates\": [\n    {\n      \"adminId\": \"uuid\",\n      \"name\": \"Tobi Lawal\",\n      \"email\": \"tobi@example.com\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Remove Overseer (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/network/overseers/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "overseers",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "BRANCH_READ. Owners of the top church remove anyone; an overseer can step down. Their passes stop working at once."
+          },
+          "response": [
+            {
+              "name": "200",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"overseers\": [\n    {\n      \"id\": \"uuid\",\n      \"name\": \"Ada Obi\",\n      \"email\": \"ada@example.com\",\n      \"addedByName\": \"Olu Ade\",\n      \"createdAt\": \"2026-11-12T09:00:00.000Z\"\n    }\n  ],\n  \"max\": 5,\n  \"youAreOverseer\": false,\n  \"canManage\": true,\n  \"candidates\": [\n    {\n      \"adminId\": \"uuid\",\n      \"name\": \"Tobi Lawal\",\n      \"email\": \"tobi@example.com\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Overseer Pass (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/network/overseers/pass",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "network",
+                "overseers",
+                "pass"
+              ]
+            },
+            "description": "BRANCH_READ, overseers only, from their seat at the top church. A 15-minute read-only access token for one branch (aud OVERSEER, no refresh token). Use it as the Bearer token: only GET admin routes within the Overseer role answer, and each page opened is logged in the branch's audit log.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"uuid\"\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "201",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"access_token\": \"jwt\",\n  \"expires_in\": 900,\n  \"token_type\": \"Bearer\",\n  \"branch\": {\n    \"id\": \"uuid\",\n    \"name\": \"ABC Ikeja\",\n    \"subdomain\": \"abc-ikeja\",\n    \"path\": \"ABC · Ikeja\",\n    \"closedAt\": null\n  }\n}"
+            }
+          ]
         }
       ]
     },

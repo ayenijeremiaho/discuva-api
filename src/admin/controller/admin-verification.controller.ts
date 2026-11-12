@@ -1,3 +1,4 @@
+import { OpenToOverseers } from '../../network-overseer/open-to-overseers.decorator';
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ClsService } from 'nestjs-cls';
@@ -15,6 +16,7 @@ export class AdminVerificationController {
     private readonly cls: ClsService<AppClsStore>,
   ) {}
 
+  @OpenToOverseers()
   @Get()
   status() {
     return this.churchRequests.getVerification(this.cls.get('tenantId'));

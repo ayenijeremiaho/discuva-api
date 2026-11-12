@@ -24,7 +24,10 @@ const mockTenantRepo = {
 const mockRollupRepo = { save: jest.fn(), findBy: jest.fn() };
 const mockMemberRepo = { count: jest.fn() };
 const mockSubscriptionRepo = { findOneBy: jest.fn(), save: jest.fn() };
-const mockCacheService = { del: jest.fn() };
+const mockCacheService = {
+  del: jest.fn(),
+  delGlobal: jest.fn().mockResolvedValue(1),
+};
 
 function mockQueryBuilder(raw: any) {
   return {
@@ -158,6 +161,9 @@ describe('BranchRollupService', () => {
       expect(mockTenantRepo.update).toHaveBeenCalledWith('branch-1', {
         shareGivingWithParent: true,
       });
+      expect(mockCacheService.delGlobal).toHaveBeenCalledWith(
+        'overseer-branch:branch-1',
+      );
     });
   });
 });

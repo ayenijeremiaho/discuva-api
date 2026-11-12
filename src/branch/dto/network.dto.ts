@@ -159,3 +159,13 @@ export class ScheduleClosureDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   closesOn: string;
 }
+
+export class AddOverseerDto {
+  @IsUUID()
+  adminId: string;
+}
+
+export class OverseerPassDto {
+  @IsUUID()
+  tenantId: string;
+}

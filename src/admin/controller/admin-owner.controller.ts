@@ -1,3 +1,4 @@
+import { OpenToOverseers } from '../../network-overseer/open-to-overseers.decorator';
 import {
   Controller,
   Delete,
@@ -20,6 +21,7 @@ import { AdminOwnerService } from '../service/admin-owner.service';
 export class AdminOwnerController {
   constructor(private readonly owners: AdminOwnerService) {}
 
+  @OpenToOverseers()
   @Get()
   list() {
     return this.owners.list();

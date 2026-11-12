@@ -2798,7 +2798,27 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Migration:** root `1807296000000-AddBranchClosures` (`tenants.closed_at`, `branch_closures` with `uq_branch_closures_scheduled`, `idx_branch_closures_run_at` and `idx_branch_closures_root`).
 - **Database cost:** nothing polls. One job per closing on the day, plus the nightly indexed check for overdue ones. The day itself does a few writes per member (about 450 ms for three members locally).
 
-**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
+**Network overseers:** up to 5 admins of a network's top church, named by its owners, who can look inside every branch read-only. `NetworkOverseerService` (`src/branch/service/network-overseer.service.ts`) names them and issues passes; `OverseerAccessService` (`src/network-overseer/`, global) checks passes and limits what they open.
+- **Endpoints (admin):**
+  - `GET /network/overseers` (BRANCH_READ) returns `{ overseers: [{ id, name, email, addedByName, createdAt }], max, youAreOverseer, canManage, candidates }`. It works at any church in the network, so a branch can see who may look in. `candidates` (the top church's active admins not yet named) is filled for the top church's owners only.
+  - `POST /network/overseers { adminId }` (BRANCH_WRITE, owners of the top church) names one; at most 5 (`NETWORK_OVERSEER_MAX`), 409 if already named.
+  - `DELETE /network/overseers/:id` (BRANCH_READ): owners of the top church remove anyone, an overseer can step down. Their passes stop working at once.
+  - `POST /network/overseers/pass { tenantId }` (BRANCH_READ, overseers only, from their seat at the top church; 30 a minute) returns `{ access_token, expires_in: 900, token_type, branch: { id, name, subdomain, path, closedAt } }`. Any open or closed church in the network except the top church itself.
+- **The pass:** an access JWT with `aud: 'OVERSEER'`, `sub` = the overseer row id and `tenantId`/`schemaName` of the branch, valid 15 minutes, with no session or refresh token. The portal gets a new one when it expires.
+  - `JwtStrategy` sends it to `OverseerAccessService.validatePass`, which refuses it unless the request lands on the branch it names, the overseer row still exists, and the branch is in their network (not the top church). The overseer and the branch's `{ networkRootId, sharesGiving }` are cached 5 minutes (`network-overseer:<id>`, `overseer-branch:<tenantId>`); removing an overseer or changing giving sharing clears them.
+  - `JwtAuthGuard` refuses the pass on any route not guarded by `AdminGuard` (member and worker routes), 403 `OVERSEER_READ_ONLY`.
+- **What `AdminGuard` allows:**
+  - **Reads only:** anything but GET or HEAD is refused (403 `OVERSEER_READ_ONLY`), and the request's transaction is set `transaction_read_only`, so a page that writes as it loads can't either.
+  - **A fixed Overseer role:** every `:read` permission except prayer, pastor feedback, follow-up, email and SMS logs, communication providers, YouTube, social media and billing. Giving (`tithe:read`, `finance:read`, `finance:report`) is included only when the branch shares giving. Owner-only routes are refused.
+  - **Routes with no permission:** refused unless marked `@OpenToOverseers()` (`GET /admin/users/me`, `/admin/verification`, `/admin/owners`). Anything outside the role answers 403 `OVERSEER_NOT_SHOWN`.
+  - **Who they are:** `request.admin` is a stand-in admin (`overseer: true`, role "Overseer", never an owner); `GET /admin/users/me` returns it.
+- **The branch's log:** each page opened (by address, without the query string) is written to the branch's audit log as `OVERSEER_VIEWED` (`targetName`/`targetEmail` = the overseer, `metadata: { overseerId, path }`), once per page per 10 minutes (`overseer-view:<id>:<path>` counter). Naming and removing log `NETWORK_OVERSEER_ADDED`/`_REMOVED` at the top church.
+- **Admin portal:** the Network page has an Overseers card (top church: add/remove; branches: who can look in) and, for overseers, **Look inside** on each branch. That opens `/overseer?branch=<id>` in a new tab; the tab keeps `dc_overseer_view` in sessionStorage, so its refresh swaps the overseer's own token for a pass, and shows a read-only banner with Leave. Signing out there only drops the pass.
+- **Console:** `GET /platform/networks/:rootId` also returns `overseers: [{ name, since }]`.
+- **Migration:** root `1807382400000-AddNetworkOverseers` (`network_overseers` with unique `(network_root_id, member_id)`).
+- **Database cost:** naming is a few writes. A pass check is two cached lookups. Each page an overseer opens adds one audit row at most every 10 minutes, written by the existing audit queue. Nothing scheduled.
+
+**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names, the last 20 moves, closings and overseers' names. Structure and figures only, never members' details.
 
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 
@@ -17156,7 +17176,7 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Switching:** `GET /auth/account/churches` now includes each church's `networkRootId`, so the app can switch within its own network without leaving its address.
 - **Notifications:** the network app has one browser push subscription, held by one church at a time (each church schema's `push_subscriptions`). Switching branches calls `DELETE /notifications/subscribe` with the old church's sign-in, then the next sign-in registers the same subscription with the new branch. Notification icons come from the installed app's manifest, so they show the network's logo. An app installed earlier at a branch's own address keeps its own subscription.
 
-**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
+**Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names, the last 20 moves, closings and overseers' names. Structure and figures only, never members' details.
 
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.
 
