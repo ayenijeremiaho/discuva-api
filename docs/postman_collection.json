@@ -47388,7 +47388,7 @@
                 "available"
               ]
             },
-            "description": "Public. {available, profile}: available shows email-first joining; profile turns on the Global Profile screens.",
+            "description": "Public. {available, profile, network, inNetwork}: available shows email-first joining; profile turns on the Global Profile screens; network = Church networks on here, inNetwork = on and this church is in a network (Phase 4 release notes).",
             "auth": {
               "type": "noauth"
             }
