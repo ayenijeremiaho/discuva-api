@@ -5,73 +5,50 @@ import { MemberTimelineService } from '../service/member-timeline.service';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { REQUIRES_PERMISSION_KEY } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
-import type { Response } from 'express';
+import { REQUIRES_PLAN_KEY } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { Admin } from '../../admin/entity/admin.entity';
 
-describe('member export endpoints', () => {
-  const service = {
-    exportCsv: jest.fn().mockResolvedValue('\uFEFF"First Name"\r\n"Ada"\r\n'),
-  };
+describe('member email export endpoints', () => {
+  const service = { emailExport: jest.fn().mockResolvedValue(undefined) };
   const controller = new MemberController(
     service as unknown as MemberService,
     {} as MemberTimelineService,
   );
-  const response = { setHeader: jest.fn(), send: jest.fn() };
   beforeEach(() => jest.clearAllMocks());
 
   it.each([
-    ['exportMembers', 'export'],
-    ['exportWorkers', 'workers/export'],
-  ] as const)('%s requires member-read admin access', (method, path) => {
-    expect(Reflect.getMetadata(GUARDS_METADATA, controller[method])).toContain(
-      AdminGuard,
-    );
-    expect(
-      Reflect.getMetadata(REQUIRES_PERMISSION_KEY, controller[method]),
-    ).toBe(AdminPermission.MEMBERS_READ);
-    expect(Reflect.getMetadata(PATH_METADATA, controller[method])).toBe(path);
+    ['exportMembers', 'export-email'],
+    ['exportWorkers', 'workers/export-email'],
+  ] as const)(
+    '%s requires member-read admin access and the bulk-export plan',
+    (method, path) => {
+      expect(Reflect.getMetadata(GUARDS_METADATA, controller[method])).toEqual([
+        AdminGuard,
+        PlanGuard,
+      ]);
+      expect(
+        Reflect.getMetadata(REQUIRES_PERMISSION_KEY, controller[method]),
+      ).toBe(AdminPermission.MEMBERS_READ);
+      expect(Reflect.getMetadata(REQUIRES_PLAN_KEY, controller[method])).toBe(
+        PlanFeature.BULK_EXPORT,
+      );
+      expect(Reflect.getMetadata(PATH_METADATA, controller[method])).toBe(path);
+    },
+  );
+
+  it('passes the member filters and authenticated admin', async () => {
+    const admin = { id: 'admin-1' } as Admin;
+    const dto = { search: 'Ada', wantsToServe: true };
+    await controller.exportMembers(dto, admin);
+    expect(service.emailExport).toHaveBeenCalledWith(dto, admin);
   });
 
-  it('sends a CSV attachment rather than a JSON envelope', async () => {
-    await controller.exportMembers(
-      response as unknown as Response,
-      undefined,
-      'Ada',
-      'true',
-    );
-    expect(service.exportCsv).toHaveBeenCalledWith(
-      expect.objectContaining({ search: 'Ada', wantsToServe: true }),
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
-      'text/csv; charset=utf-8',
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Cache-Control',
-      'no-store',
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Content-Disposition',
-      expect.stringMatching(/attachment; filename="members-.*\.csv"/),
-    );
-    expect(response.send).toHaveBeenCalledWith(
-      expect.stringContaining('\uFEFF'),
-    );
-  });
-
-  it('preserves the non-trainee filter', async () => {
-    await controller.exportWorkers(
-      response as unknown as Response,
-      undefined,
-      undefined,
-      ' Ada ',
-      'false',
-    );
-    expect(service.exportCsv).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workers: true,
-        search: 'Ada',
-        isTrainee: false,
-      }),
-    );
+  it('passes worker filters without losing false', async () => {
+    const admin = { id: 'admin-1' } as Admin;
+    const dto = { search: 'Ada', isTrainee: false };
+    await controller.exportWorkers(dto, admin);
+    expect(service.emailExport).toHaveBeenCalledWith(dto, admin, true);
   });
 });

@@ -1,4 +1,12 @@
-import type { Response } from 'express';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import {
+  ExportMembersEmailDto,
+  ExportWorkersEmailDto,
+} from '../dto/export-members-email.dto';
 import {
   BadRequestException,
   Body,
@@ -12,7 +20,6 @@ import {
   Patch,
   Post,
   Query,
-  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -116,54 +123,28 @@ export class MemberController {
     return UtilityService.getPaginationResponseDto(result, MemberDto);
   }
 
-  @UseGuards(AdminGuard)
+  @UseGuards(AdminGuard, PlanGuard)
   @RequiresPermission(AdminPermission.MEMBERS_READ)
-  @Get('export')
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
+  @HttpCode(HttpStatus.OK)
+  @Post('export-email')
   async exportMembers(
-    @Res() response: Response,
-    @Query('role') role?: MemberRoleEnum,
-    @Query('search') search?: string,
-    @Query('wantsToServe') wantsToServe?: string,
-    @Query('status') status?: MemberStatusEnum,
+    @Body() dto: ExportMembersEmailDto,
+    @CurrentAdmin() admin: Admin,
   ) {
-    const csv = await this.memberService.exportCsv({
-      role,
-      search,
-      wantsToServe: wantsToServe === 'true',
-      status,
-    });
-    this.sendCsv(response, csv, 'members');
+    await this.memberService.emailExport(dto, admin);
   }
 
-  @UseGuards(AdminGuard)
+  @UseGuards(AdminGuard, PlanGuard)
   @RequiresPermission(AdminPermission.MEMBERS_READ)
-  @Get('workers/export')
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
+  @HttpCode(HttpStatus.OK)
+  @Post('workers/export-email')
   async exportWorkers(
-    @Res() response: Response,
-    @Query('status') workerStatus?: WorkerStatusEnum,
-    @Query('departmentId', new ParseUUIDPipe({ optional: true }))
-    departmentId?: string,
-    @Query('search') search?: string,
-    @Query('isTrainee') isTrainee?: string,
+    @Body() dto: ExportWorkersEmailDto,
+    @CurrentAdmin() admin: Admin,
   ) {
-    const csv = await this.memberService.exportCsv({
-      workers: true,
-      workerStatus,
-      departmentId,
-      search: search?.trim() || undefined,
-      isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
-    });
-    this.sendCsv(response, csv, 'workers');
-  }
-
-  private sendCsv(response: Response, csv: string, name: string) {
-    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.csv"`,
-    );
-    response.setHeader('Cache-Control', 'no-store');
-    response.send(csv);
+    await this.memberService.emailExport(dto, admin, true);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -23685,15 +23685,23 @@ profile), each reading the database at most once per 5 minutes.
 
 ### Member and worker CSV exports (2026-11-13)
 
-Admin `MEMBERS_READ` access is required for `GET /v1/members/export` and
-`GET /v1/members/workers/export`. Both return a downloadable UTF-8 CSV (with BOM,
-CRLF records, quoted/escaped cells and `Cache-Control: no-store`), rather than a
-JSON envelope. Member export accepts `role`, `status`, `search`, `wantsToServe`;
-worker export accepts `status`, `departmentId`, `search`, `isTrainee`. Filters use
-the same query builders as the corresponding lists, including inactive former
-workers and secondary departments. No page/limit parameter: all matching records
-are exported, ordered by member ID. The admin portal's Export CSV button passes
-the current filters and downloads the file through the authenticated API client.
+Admin `MEMBERS_READ` and the existing `BULK_EXPORT` plan feature are required
+for `POST /v1/members/export-email` and `POST /v1/members/workers/export-email`.
+Both accept a JSON body with an optional validated `recipientEmail`, defaulting
+to the authenticated admin's member email. Member filters: `role`, `status`,
+`search`, `wantsToServe` (boolean). Worker filters: `status`, `departmentId` (UUID),
+`search`, `isTrainee` (boolean). Filters use the same query builders as the lists,
+including inactive former workers and secondary departments. No pagination:
+all matching records are exported, ordered by member ID.
+
+The portal reuses `EmailReportButton` with an "Email CSV" label, recipient dialog,
+queue confirmation and retry on failure. The API builds the CSV then queues it
+as a UTF-8 attachment through `EmailQueueService`, using `report-export` and the
+church timezone. It returns HTTP 200 after successful queueing (delivery happens
+through the existing worker and retries). Missing recipients or suppressed email
+queueing fail explicitly; `REPORT_EXPORTED` records the actor, recipient and
+filters only after queue success. No direct-download routes remain. CSV has a
+BOM, CRLF records and quoted/escaped cells.
 
 Columns include member ID, names, email, phone, role, member status, gender,
 separate birthday day/month/year (unknown parts stay blank), marital status,
@@ -23711,5 +23719,6 @@ exact multiples), no COUNT queries, N+1 queries, scheduled jobs or migrations.
 Queries reuse the existing list joins and filter indexes; ID keyset pagination
 uses the existing members primary key. Only export columns and relation IDs are
 selected. The final CSV is assembled in request memory before sending so query
-errors cannot deliver a partial successful download. Production deployment remains
-a separate release step.
+errors cannot deliver a partial successful download. Email delivery adds one job to the existing Redis/Bull email queue per export,
+plus the existing email-template/settings and delivery/audit bookkeeping. No new
+queue or scheduler. Production deployment remains a separate release step.

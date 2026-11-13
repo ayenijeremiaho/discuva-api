@@ -47872,95 +47872,77 @@
       "name": "Member and Worker CSV Exports",
       "item": [
         {
-          "name": "Export Members CSV",
+          "name": "Email Members CSV",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/members/export",
+              "raw": "{{baseUrl}}/members/export-email",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "members",
-                "export"
-              ],
-              "query": [
-                {
-                  "key": "role",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "status",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "search",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "wantsToServe",
-                  "value": "",
-                  "disabled": true
-                }
+                "export-email"
               ]
             },
-            "description": "Requires MEMBERS_READ. Downloads all matching records as UTF-8 CSV, across all pages. Save the response as a .csv file. Same filter semantics as the list endpoint."
+            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: role, status, search, wantsToServe. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
         {
-          "name": "Export Workers CSV",
+          "name": "Email Workers CSV",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/members/workers/export",
+              "raw": "{{baseUrl}}/members/workers/export-email",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "members",
                 "workers",
-                "export"
-              ],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "departmentId",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "search",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "isTrainee",
-                  "value": "",
-                  "disabled": true
-                }
+                "export-email"
               ]
             },
-            "description": "Requires MEMBERS_READ. Downloads all matching records as UTF-8 CSV, across all pages. Save the response as a .csv file. Same filter semantics as the list endpoint."
+            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: status, departmentId, search, isTrainee. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }
