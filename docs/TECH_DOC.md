@@ -23763,3 +23763,11 @@ selected. The final CSV is assembled in request memory before sending so query
 errors cannot deliver a partial successful download. Email delivery adds one job to the existing Redis/Bull email queue per export,
 plus the existing email-template/settings and delivery/audit bookkeeping. No new
 queue or scheduler. Production deployment remains a separate release step.
+
+Export configuration indexing and UI review (2026-11-13): see
+[EXPORT_CONFIGURATION_REVIEW.md](EXPORT_CONFIGURATION_REVIEW.md) for verified
+local PostgreSQL read/upsert plans and the existing unique-index definition.
+The shared email dialog now uses portal theme variables throughout, keeps its
+header/Send footer visible around scrollable content, and supports labelled
+recipient input, focus trapping, Escape close and focus restoration. This UI
+change adds no database queries, migrations or scheduled work.
