@@ -6,6 +6,21 @@ import {
 } from './export-members-email.dto';
 
 describe('email export validation', () => {
+  it('accepts supported optional fields and rejects unknown, duplicate and non-array fields', async () => {
+    for (const fields of [[], ['emergencyContactName', 'profession']]) {
+      expect(
+        await validate(plainToInstance(ExportMembersEmailDto, { fields })),
+      ).toHaveLength(0);
+    }
+    for (const fields of [['password'], ['address', 'address'], 'address']) {
+      expect(
+        (
+          await validate(plainToInstance(ExportMembersEmailDto, { fields }))
+        ).map((e) => e.property),
+      ).toContain('fields');
+    }
+  });
+
   it('accepts a blank payload for the requesting admin', async () => {
     expect(await validate(new ExportMembersEmailDto())).toHaveLength(0);
   });

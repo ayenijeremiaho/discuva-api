@@ -6,7 +6,7 @@ import {
   ExportWorkersEmailDto,
 } from '../dto/export-members-email.dto';
 import {
-  MEMBER_EXPORT_SELECT,
+  memberExportSelect,
   memberCsvHeader,
   memberCsvRow,
 } from '../utility/member-csv';
@@ -1878,6 +1878,7 @@ export class MemberService {
     search?: string;
     isTrainee?: boolean;
     wantsToServe?: boolean;
+    fields?: string[];
   }): Promise<string> {
     const qb = filters.workers
       ? this.workersQuery({ ...filters, status: filters.workerStatus })
@@ -1887,30 +1888,18 @@ export class MemberService {
           filters.wantsToServe,
           filters.status,
         );
-    const profile = filters.workers ? 'profile' : 'workerProfile';
-    qb.leftJoin('member.spouse', 'spouse').select([
-      ...MEMBER_EXPORT_SELECT,
-      ...[
-        'id',
-        'status',
-        'profession',
-        'yearJoinedWorkforce',
-        'completedSOD',
-        'completedBibleCollege',
-        'isTrainee',
-      ].map((field) => `${profile}.${field}`),
-      'department.id',
-      'department.name',
-      'secondaryDepartment.id',
-      'secondaryDepartment.name',
-    ]);
-    const lines = [memberCsvHeader()];
+    const fields = filters.fields ?? [];
+    qb.leftJoin('member.spouse', 'spouse').select(
+      memberExportSelect(fields, filters.workers),
+    );
+    const lines = [memberCsvHeader(fields, filters.workers)];
     let cursor: string | undefined;
     while (true) {
       const batch = qb.clone().orderBy('member.id', 'ASC').limit(500);
       if (cursor) batch.andWhere('member.id > :cursor', { cursor });
       const members = await batch.getMany();
-      for (const member of members) lines.push(memberCsvRow(member));
+      for (const member of members)
+        lines.push(memberCsvRow(member, fields, filters.workers));
       if (members.length < 500) break;
       cursor = members[members.length - 1].id;
     }

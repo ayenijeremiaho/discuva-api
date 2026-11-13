@@ -48668,6 +48668,36 @@
       "name": "Member and Worker CSV Exports",
       "item": [
         {
+          "name": "List CSV Export Fields",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/export-fields?workers=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "export-fields"
+              ],
+              "query": [
+                {
+                  "key": "workers",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Requires MEMBERS_READ. Returns static field keys, labels and required flags. Set workers=false for member exports. No database reads."
+          },
+          "response": []
+        },
+        {
           "name": "Email Members CSV",
           "request": {
             "method": "POST",
@@ -48691,10 +48721,10 @@
                 "export-email"
               ]
             },
-            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: role, status, search, wantsToServe. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery.",
+            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: role, status, search, wantsToServe. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery. Optional fields is an array of unique keys from GET /members/export-fields. Omit fields or send [] for core columns only. Required columns are always included.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\"\n}",
+              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\",\n  \"fields\": [\n    \"emergencyContactName\",\n    \"emergencyContactPhone\",\n    \"emergencyContactRelationship\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -48729,10 +48759,10 @@
                 "export-email"
               ]
             },
-            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: status, departmentId, search, isTrainee. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery.",
+            "description": "Requires MEMBERS_READ and BULK_EXPORT plan access. Emails all matching records as a CSV attachment through the existing email queue. Omit recipientEmail to use the requesting admin email. Optional filter fields: status, departmentId, search, isTrainee. Boolean fields must be JSON booleans. HTTP 200 confirms queueing, not final delivery. Optional fields is an array of unique keys from GET /members/export-fields. Omit fields or send [] for core columns only. Required columns are always included.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\"\n}",
+              "raw": "{\n  \"recipientEmail\": \"delivered+member-export@resend.dev\",\n  \"search\": \"\",\n  \"fields\": [\n    \"emergencyContactName\",\n    \"emergencyContactPhone\",\n    \"emergencyContactRelationship\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

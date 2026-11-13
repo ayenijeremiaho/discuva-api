@@ -38,6 +38,26 @@ describe('member email export endpoints', () => {
     },
   );
 
+  it('exposes field metadata behind member-read admin access', () => {
+    expect(
+      Reflect.getMetadata(GUARDS_METADATA, controller.getExportFields),
+    ).toEqual([AdminGuard]);
+    expect(
+      Reflect.getMetadata(REQUIRES_PERMISSION_KEY, controller.getExportFields),
+    ).toBe(AdminPermission.MEMBERS_READ);
+    expect(Reflect.getMetadata(PATH_METADATA, controller.getExportFields)).toBe(
+      'export-fields',
+    );
+    expect(
+      controller.getExportFields('true').find((f) => f.key === 'department')
+        ?.required,
+    ).toBe(true);
+    expect(
+      controller.getExportFields().find((f) => f.key === 'department')
+        ?.required,
+    ).toBe(false);
+  });
+
   it('passes the member filters and authenticated admin', async () => {
     const admin = { id: 'admin-1' } as Admin;
     const dto = { search: 'Ada', wantsToServe: true };
