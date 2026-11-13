@@ -23771,3 +23771,15 @@ The shared email dialog now uses portal theme variables throughout, keeps its
 header/Send footer visible around scrollable content, and supports labelled
 recipient input, focus trapping, Escape close and focus restoration. This UI
 change adds no database queries, migrations or scheduled work.
+
+### Member and worker directory header layout (2026-11-13)
+
+Both admin directories share DirectoryHeader. The title and result count appear
+above a dedicated action toolbar, aligned to the right from the small breakpoint
+upward, with Refresh aligned separately. Header actions
+use consistent 36px heights and portal theme variables. New Member (or Bulk Update
+on Workers) is primary; Email CSV uses a compact secondary trigger. Phones use a
+two-column action grid, with a wrapping toolbar from the small breakpoint upward.
+The CSV dialog and all filtering/export behavior are unchanged. No API routes,
+database queries, indexes, migrations or recurring work are added. This fix is
+based on production master, independently of unreleased Stage 4 changes.
