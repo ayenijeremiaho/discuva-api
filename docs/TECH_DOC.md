@@ -23745,3 +23745,12 @@ The shared email dialog now uses portal theme variables throughout, keeps its
 header/Send footer visible around scrollable content, and supports labelled
 recipient input, focus trapping, Escape close and focus restoration. This UI
 change adds no database queries, migrations or scheduled work.
+
+### Stage 4 help and FAQ review (2026-11-13)
+
+See [PHASE4_HELP_REVIEW.md](PHASE4_HELP_REVIEW.md) for the reviewed help surfaces.
+The Stage 4 branches include the shipped CSV exports, admin export help, specific
+network report/agenda help, and member FAQs for branch moves, visitors, history,
+closures and emergency contacts. Network FAQs follow existing public-network
+availability and use the existing FAQ search. Read-only network portal views hide
+the CSV action. No new API routes, database reads, indexes, migrations or jobs.
