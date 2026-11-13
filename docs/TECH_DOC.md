@@ -23682,3 +23682,34 @@ wording is sent as written.
 **Database cost:** one small root table written only on console saves. A module cache miss adds two cached lookups (the tenant's type and the type's
 profile), each reading the database at most once per 5 minutes.
 
+
+### Member and worker CSV exports (2026-11-13)
+
+Admin `MEMBERS_READ` access is required for `GET /v1/members/export` and
+`GET /v1/members/workers/export`. Both return a downloadable UTF-8 CSV (with BOM,
+CRLF records, quoted/escaped cells and `Cache-Control: no-store`), rather than a
+JSON envelope. Member export accepts `role`, `status`, `search`, `wantsToServe`;
+worker export accepts `status`, `departmentId`, `search`, `isTrainee`. Filters use
+the same query builders as the corresponding lists, including inactive former
+workers and secondary departments. No page/limit parameter: all matching records
+are exported, ordered by member ID. The admin portal's Export CSV button passes
+the current filters and downloads the file through the authenticated API client.
+
+Columns include member ID, names, email, phone, role, member status, gender,
+separate birthday day/month/year (unknown parts stay blank), marital status,
+spouse name, address, emergency contact name/phone/relationship, church joining,
+born-again and baptism dates, Holy Ghost baptism, clergy title, serving interest,
+primary/secondary departments, worker status, trainee status, profession,
+workforce joining date, SOD/Bible College completion and record creation date.
+Dates use YYYY-MM-DD, booleans use Yes/No, and missing values are blank. Potential
+spreadsheet formulas (including international phone numbers beginning with +)
+receive a leading apostrophe. Authentication fields, device IDs, global account
+IDs and internal preferences are never selected or exported.
+
+Database cost: one on-demand query per 500 records (plus a final empty query for
+exact multiples), no COUNT queries, N+1 queries, scheduled jobs or migrations.
+Queries reuse the existing list joins and filter indexes; ID keyset pagination
+uses the existing members primary key. Only export columns and relation IDs are
+selected. The final CSV is assembled in request memory before sending so query
+errors cannot deliver a partial successful download. Production deployment remains
+a separate release step.

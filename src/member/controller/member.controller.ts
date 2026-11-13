@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import {
   BadRequestException,
   Body,
@@ -11,6 +12,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -112,6 +114,56 @@ export class MemberController {
       isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
     });
     return UtilityService.getPaginationResponseDto(result, MemberDto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('export')
+  async exportMembers(
+    @Res() response: Response,
+    @Query('role') role?: MemberRoleEnum,
+    @Query('search') search?: string,
+    @Query('wantsToServe') wantsToServe?: string,
+    @Query('status') status?: MemberStatusEnum,
+  ) {
+    const csv = await this.memberService.exportCsv({
+      role,
+      search,
+      wantsToServe: wantsToServe === 'true',
+      status,
+    });
+    this.sendCsv(response, csv, 'members');
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('workers/export')
+  async exportWorkers(
+    @Res() response: Response,
+    @Query('status') workerStatus?: WorkerStatusEnum,
+    @Query('departmentId', new ParseUUIDPipe({ optional: true }))
+    departmentId?: string,
+    @Query('search') search?: string,
+    @Query('isTrainee') isTrainee?: string,
+  ) {
+    const csv = await this.memberService.exportCsv({
+      workers: true,
+      workerStatus,
+      departmentId,
+      search: search?.trim() || undefined,
+      isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
+    });
+    this.sendCsv(response, csv, 'workers');
+  }
+
+  private sendCsv(response: Response, csv: string, name: string) {
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.csv"`,
+    );
+    response.setHeader('Cache-Control', 'no-store');
+    response.send(csv);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -47867,6 +47867,104 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Member and Worker CSV Exports",
+      "item": [
+        {
+          "name": "Export Members CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "wantsToServe",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Requires MEMBERS_READ. Downloads all matching records as UTF-8 CSV, across all pages. Save the response as a .csv file. Same filter semantics as the list endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Workers CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/workers/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "workers",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "departmentId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "isTrainee",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Requires MEMBERS_READ. Downloads all matching records as UTF-8 CSV, across all pages. Save the response as a .csv file. Same filter semantics as the list endpoint."
+          },
+          "response": []
+        }
+      ]
     }
   ]
 }

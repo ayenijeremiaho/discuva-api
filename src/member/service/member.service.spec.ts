@@ -1740,6 +1740,85 @@ describe('MemberService', () => {
     });
   });
 
+  describe('CSV export', () => {
+    it('exports every batch using an ID cursor and the member filters', async () => {
+      const rows = Array.from({ length: 500 }, (_, i) => ({
+        id: `id-${i}`,
+        firstname: `Person ${i}`,
+      }));
+      const qb: any = {};
+      for (const method of [
+        'leftJoinAndSelect',
+        'leftJoin',
+        'select',
+        'orderBy',
+        'andWhere',
+        'clone',
+        'limit',
+      ]) {
+        qb[method] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getMany = jest
+        .fn()
+        .mockResolvedValueOnce(rows)
+        .mockResolvedValueOnce([{ id: 'last', firstname: 'Final person' }]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      const csv = await service.exportCsv({
+        role: MemberRoleEnum.MEMBER,
+        search: 'Person',
+        wantsToServe: true,
+      });
+      expect(csv.startsWith('\uFEFF')).toBe(true);
+      expect(csv.split('\r\n')).toHaveLength(503);
+      expect(csv).toContain('Final person');
+      expect(qb.andWhere).toHaveBeenCalledWith('member.id > :cursor', {
+        cursor: 'id-499',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('member.role = :role', {
+        role: MemberRoleEnum.MEMBER,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'member.serveInterestAt IS NOT NULL',
+      );
+      expect(qb.select.mock.calls[0][0]).not.toContain('member.password');
+    });
+
+    it('uses the workers query including former workers and secondary departments', async () => {
+      const qb: any = {};
+      for (const method of [
+        'innerJoinAndSelect',
+        'leftJoinAndSelect',
+        'leftJoin',
+        'select',
+        'where',
+        'andWhere',
+        'orderBy',
+        'clone',
+        'limit',
+      ]) {
+        qb[method] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getMany = jest.fn().mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      const csv = await service.exportCsv({
+        workers: true,
+        workerStatus: WorkerStatusEnum.INACTIVE,
+        departmentId: 'dept',
+        isTrainee: false,
+      });
+      expect(qb.where.mock.calls[0][0]).toContain('profile.status = :inactive');
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(department.id = :departmentId OR secondaryDepartment.id = :departmentId)',
+        { departmentId: 'dept' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'profile.isTrainee = :isTrainee',
+        { isTrainee: false },
+      );
+      expect(csv.split('\r\n')).toHaveLength(2);
+    });
+  });
+
   describe('getAll wantsToServe filter', () => {
     function listQb() {
       const qb = {
