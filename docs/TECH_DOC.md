@@ -23775,7 +23775,8 @@ change adds no database queries, migrations or scheduled work.
 ### Member and worker directory header layout (2026-11-13)
 
 Both admin directories share DirectoryHeader. The title and result count appear
-above a dedicated action toolbar, with Refresh aligned separately. Header actions
+above a dedicated action toolbar, aligned to the right from the small breakpoint
+upward, with Refresh aligned separately. Header actions
 use consistent 36px heights and portal theme variables. New Member (or Bulk Update
 on Workers) is primary; Email CSV uses a compact secondary trigger. Phones use a
 two-column action grid, with a wrapping toolbar from the small breakpoint upward.
