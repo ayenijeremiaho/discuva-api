@@ -120,9 +120,12 @@ function setup(over: { children?: string[]; existing?: boolean } = {}) {
     { log: jest.fn() } as never,
     cls as never,
     {} as never,
+    accounts as never,
   );
-  return { service, closureRepo, queue, announcements };
+  return { service, closureRepo, queue, announcements, accounts };
 }
+
+const accounts = { isNetworkOnFor: jest.fn().mockResolvedValue(true) };
 
 describe('NetworkClosureService', () => {
   it('schedules a closing with one job set for the date, and tells members', async () => {

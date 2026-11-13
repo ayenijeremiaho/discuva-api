@@ -166,6 +166,26 @@ describe('DiscuvaAccountService', () => {
       modes(2, 2);
       await expect(service.isProfileOn()).resolves.toBe(true);
     });
+
+    it('turns Church networks on only where One Discuva sign-in and Global Profile are on too', async () => {
+      const modes = (account: number, profile: number, network: number) =>
+        settings.getNumber.mockImplementation(async (key: string) =>
+          key === 'discuva_account_mode'
+            ? account
+            : key === 'discuva_profile_mode'
+              ? profile
+              : key === 'church_network_mode'
+                ? network
+                : 10,
+        );
+      modes(2, 0, 2);
+      await expect(service.isNetworkOnFor('t1')).resolves.toBe(false);
+      modes(2, 2, 0);
+      await expect(service.networksOff()).resolves.toBe(true);
+      await expect(service.isNetworkOnFor('t1')).resolves.toBe(false);
+      modes(2, 2, 2);
+      await expect(service.isNetworkOnFor('t1')).resolves.toBe(true);
+    });
   });
 
   describe('checking a password', () => {

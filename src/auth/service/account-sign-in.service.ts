@@ -1,4 +1,3 @@
-import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { NetworkShareService } from '../../network-share/network-share.service';
 import {
   BadRequestException,
@@ -478,7 +477,7 @@ export class AccountSignInService {
     const [available, profile, network, rootId] = await Promise.all([
       this.accounts.isOn(),
       this.accounts.isProfileOn(),
-      this.accounts.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE),
+      this.accounts.isNetworkOn(),
       tenantId ? this.networkShare.networkRootOf(tenantId) : null,
     ]);
     return { available, profile, network, inNetwork: network && !!rootId };

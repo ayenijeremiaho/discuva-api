@@ -43,6 +43,12 @@ const TEST_TENANTS_TTL_MS = 5 * 60_000;
 export { normaliseEmail };
 
 // Decides whether the church copy or the account holds the password and device; writes go to both so switching off never locks anyone out.
+const NETWORK_SWITCHES = [
+  PlatformSettingKey.DISCUVA_ACCOUNT_MODE,
+  PlatformSettingKey.DISCUVA_PROFILE_MODE,
+  PlatformSettingKey.CHURCH_NETWORK_MODE,
+];
+
 @Injectable()
 export class DiscuvaAccountService {
   private readonly logger = new Logger(DiscuvaAccountService.name);
@@ -102,12 +108,41 @@ export class DiscuvaAccountService {
     );
   }
 
-  // A 0/1/2 platform switch: off, test churches only, everyone. Read for the church in context.
-  async readModeOn(key: PlatformSettingKey): Promise<boolean> {
+  // Church networks build on One Discuva sign-in and Global Profile, so all three must be on for this church.
+  isNetworkOn(): Promise<boolean> {
+    return this.memo(
+      `network:${this.cls.get('tenantId')}`,
+      async () =>
+        (await this.isProfileOn()) &&
+        this.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE),
+    );
+  }
+
+  // The same check outside a request (scheduled work and queued jobs), for a church named by id.
+  async isNetworkOnFor(tenantId: string): Promise<boolean> {
+    for (const key of NETWORK_SWITCHES) {
+      if (!(await this.readModeOn(key, tenantId))) return false;
+    }
+    return true;
+  }
+
+  // At 0 nothing about networks runs anywhere, so background work can stop before touching the database.
+  async networksOff(): Promise<boolean> {
+    return (
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.CHURCH_NETWORK_MODE,
+      )) === AccountMode.OFF
+    );
+  }
+
+  // A 0/1/2 platform switch: off, test churches only, everyone. Read for the church in context unless one is named.
+  async readModeOn(
+    key: PlatformSettingKey,
+    tenantId: string | undefined = this.cls.get('tenantId'),
+  ): Promise<boolean> {
     const mode = await this.platformSettings.getNumber(key);
     if (mode === AccountMode.ON) return true;
     if (mode !== AccountMode.TEST) return false;
-    const tenantId = this.cls.get('tenantId');
     return !!tenantId && (await this.testTenantIds()).has(tenantId);
   }
 

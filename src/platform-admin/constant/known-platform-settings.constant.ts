@@ -187,7 +187,7 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
   },
   [PlatformSettingKey.CHURCH_NETWORK_MODE]: {
     label: 'Church Networks',
-    unit: '0 = off, 1 = test churches only (DISCUVA_ACCOUNT_TEST_TENANTS), 2 = every verified church',
+    unit: '0 = off, 1 = test churches only (DISCUVA_ACCOUNT_TEST_TENANTS), 2 = every verified church. Needs One Discuva Sign-in and Global Profile at the same level or higher',
     defaultValue: 0,
     min: 0,
     max: 2,

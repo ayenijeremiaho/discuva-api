@@ -1,3 +1,4 @@
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import {
   BadRequestException,
   ConflictException,
@@ -111,6 +112,7 @@ export class NetworkClosureService {
     private readonly auditLog: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   async schedule(
@@ -299,6 +301,7 @@ export class NetworkClosureService {
       select: { id: true, tenantId: true },
     });
     for (const c of due) {
+      if (!(await this.accounts.isNetworkOnFor(c.tenantId))) continue;
       await this.queue.add(
         { kind: 'closure', sourceTenantId: c.tenantId, sourceId: c.id },
         { jobId: `closure:${c.id}`, attempts: 2, removeOnComplete: true },

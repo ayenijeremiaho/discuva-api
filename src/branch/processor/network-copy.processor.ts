@@ -1,3 +1,4 @@
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { Logger } from '@nestjs/common';
 import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job } from 'bull';
@@ -17,11 +18,22 @@ export class NetworkCopyProcessor {
     private readonly copies: NetworkCopyService,
     private readonly rollups: NetworkRollupService,
     private readonly closures: NetworkClosureService,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   @Process()
   async handle(job: Job<NetworkCopyJob>): Promise<void> {
     const { kind, sourceTenantId, sourceId } = job.data;
+    // Queued before networks were switched off: dropped, and a closing waits for the nightly check once they're back on.
+    if (
+      kind !== 'announcement' &&
+      !(await this.accounts.isNetworkOnFor(sourceTenantId))
+    ) {
+      this.logger.log(
+        `Skipped ${kind} for ${sourceTenantId}: networks are off`,
+      );
+      return;
+    }
     if (kind === 'events') await this.copies.copyEvents(sourceTenantId);
     else if (kind === 'rollup') await this.rollups.compute(sourceTenantId);
     else if (kind === 'closure') await this.closures.run(sourceId!);

@@ -2,7 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import { NetworkShareService, networkRootKey } from './network-share.service';
 
 function setup(root: string | null, hasBranches = true, networksOn = true) {
-  const accounts = { readModeOn: jest.fn().mockResolvedValue(networksOn) };
+  const accounts = {
+    isNetworkOn: jest.fn().mockResolvedValue(networksOn),
+    isNetworkOnFor: jest.fn().mockResolvedValue(networksOn),
+    networksOff: jest.fn().mockResolvedValue(!networksOn),
+  };
   const tenantRepo = {
     findOne: jest.fn().mockResolvedValue({ id: 't1', networkRootId: root }),
     exists: jest.fn().mockResolvedValue(hasBranches),
@@ -28,6 +32,7 @@ function setup(root: string | null, hasBranches = true, networksOn = true) {
     queue,
     cache,
     tenantRepo,
+    accounts,
   };
 }
 
@@ -95,5 +100,14 @@ describe('NetworkShareService', () => {
     const t = setup(null);
     await t.service.rollupChanged();
     expect(t.cache.acquireLock).not.toHaveBeenCalled();
+  });
+
+  it('queues nothing on a save while church networks are at 0, without even looking the church up', async () => {
+    const t = setup('root', true, false);
+    await t.service.rollupChanged();
+    await t.service.eventsChanged();
+    expect(t.tenantRepo.findOne).not.toHaveBeenCalled();
+    expect(t.cache.getGlobal).not.toHaveBeenCalled();
+    expect(t.queue.add).not.toHaveBeenCalled();
   });
 });

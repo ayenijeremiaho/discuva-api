@@ -120,6 +120,59 @@ describe('PlatformSettingsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    describe('switch order: One Discuva sign-in, then Global Profile, then Church networks', () => {
+      const modes = (account: number, profile: number, network: number) =>
+        mockCacheService.getGlobal.mockImplementation(async (k: string) =>
+          k.includes(PlatformSettingKey.DISCUVA_ACCOUNT_MODE)
+            ? account
+            : k.includes(PlatformSettingKey.DISCUVA_PROFILE_MODE)
+              ? profile
+              : k.includes(PlatformSettingKey.CHURCH_NETWORK_MODE)
+                ? network
+                : undefined,
+        );
+      const set = (key: PlatformSettingKey, value: number) =>
+        service.upsert(key, { value });
+
+      beforeEach(() => {
+        mockSettingRepo.findOne.mockResolvedValue(null);
+        mockSettingRepo.create.mockImplementation((x) => x);
+        mockSettingRepo.save.mockImplementation(async (x) => x);
+      });
+
+      it('refuses Church networks until One Discuva sign-in and Global Profile are on', async () => {
+        modes(2, 0, 0);
+        await expect(
+          set(PlatformSettingKey.CHURCH_NETWORK_MODE, 1),
+        ).rejects.toThrow('Set Global Profile to 1 or more first');
+        modes(1, 1, 0);
+        await expect(
+          set(PlatformSettingKey.CHURCH_NETWORK_MODE, 2),
+        ).rejects.toThrow('Set One Discuva Sign-in to 2 or more first');
+        modes(2, 2, 0);
+        await expect(
+          set(PlatformSettingKey.CHURCH_NETWORK_MODE, 2),
+        ).resolves.toEqual(expect.objectContaining({ value: 2 }));
+      });
+
+      it('refuses turning a switch below one that builds on it', async () => {
+        modes(2, 2, 2);
+        await expect(
+          set(PlatformSettingKey.DISCUVA_PROFILE_MODE, 0),
+        ).rejects.toThrow('Set Church Networks to 0 or less first');
+        await expect(
+          set(PlatformSettingKey.DISCUVA_ACCOUNT_MODE, 1),
+        ).rejects.toThrow('Set Global Profile to 1 or less first');
+      });
+
+      it('always lets Church networks go back to 0', async () => {
+        modes(2, 2, 2);
+        await expect(
+          set(PlatformSettingKey.CHURCH_NETWORK_MODE, 0),
+        ).resolves.toEqual(expect.objectContaining({ value: 0 }));
+      });
+    });
+
     it('rejects a value outside the known min/max for that key', async () => {
       await expect(
         service.upsert(PlatformSettingKey.MAX_LOGO_UPLOAD_MB, { value: 100 }),

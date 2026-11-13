@@ -145,7 +145,7 @@ export class NetworkService {
   ) {}
 
   isAvailable(): Promise<boolean> {
-    return this.accounts.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE);
+    return this.accounts.isNetworkOn();
   }
 
   async view(admin: Admin): Promise<NetworkView> {

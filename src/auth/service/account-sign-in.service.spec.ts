@@ -39,7 +39,7 @@ const accounts = {
   homeIn: jest.fn(),
   isOn: jest.fn(),
   isProfileOn: jest.fn().mockResolvedValue(false),
-  readModeOn: jest.fn().mockResolvedValue(false),
+  isNetworkOn: jest.fn().mockResolvedValue(false),
   linkHere: jest.fn(),
   recordConsent: jest.fn(),
   accountFor: jest.fn(),
@@ -138,7 +138,7 @@ describe('AccountSignInService', () => {
 
   it('says whether church networks are on here, and whether this church is in one', async () => {
     accounts.isOn.mockResolvedValue(true);
-    accounts.readModeOn.mockResolvedValueOnce(true);
+    accounts.isNetworkOn.mockResolvedValueOnce(true);
     networkShare.networkRootOf.mockResolvedValueOnce('root-1');
     await expect(service.available()).resolves.toEqual(
       expect.objectContaining({ network: true, inNetwork: true }),

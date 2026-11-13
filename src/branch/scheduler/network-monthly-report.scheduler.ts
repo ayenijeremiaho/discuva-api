@@ -1,3 +1,4 @@
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -77,10 +78,12 @@ export class NetworkMonthlyReportScheduler {
     private readonly cache: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   @Cron('0 7 8 * *', { timeZone: CHURCH_TIMEZONE })
   async sendAll(): Promise<void> {
+    if (await this.accounts.networksOff()) return;
     if (!(await this.cache.acquireLock(LOCK, 3600))) return;
     try {
       // Churches with at least one active branch directly under them.
