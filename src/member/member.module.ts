@@ -1,3 +1,5 @@
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
+import { MemberExportSettingsService } from './service/member-export-settings.service';
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Member } from './entity/member.entity';
@@ -31,6 +33,7 @@ import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.e
   imports: [
     TenantTypeOrmModule.forFeature([
       Member,
+      ChurchSetting,
       WorkerProfile,
       Clergy,
       ClergyTitle,
@@ -56,6 +59,7 @@ import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.e
   controllers: [MemberController, MemberImportController, MilestoneController],
   providers: [
     MemberService,
+    MemberExportSettingsService,
     MemberSessionService,
     MemberImportService,
     MemberTimelineService,

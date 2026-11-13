@@ -1,3 +1,15 @@
+import { MemberExportSettingsService } from '../service/member-export-settings.service';
+import { UpdateExportSettingsDto } from '../dto/update-export-settings.dto';
+import { memberExportFields } from '../utility/member-csv';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import {
+  ExportMembersEmailDto,
+  ExportWorkersEmailDto,
+} from '../dto/export-members-email.dto';
 import {
   BadRequestException,
   Body,
@@ -52,6 +64,7 @@ export class MemberController {
   constructor(
     private readonly memberService: MemberService,
     private readonly memberTimelineService: MemberTimelineService,
+    private readonly exportSettings: MemberExportSettingsService,
   ) {}
 
   @UseGuards(AdminGuard)
@@ -112,6 +125,55 @@ export class MemberController {
       isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
     });
     return UtilityService.getPaginationResponseDto(result, MemberDto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('export-fields')
+  getExportFields(@Query('workers') workers?: string) {
+    return memberExportFields(workers === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('export-settings')
+  getExportSettings(@Query('workers') workers?: string) {
+    return this.exportSettings.get(workers === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Patch('export-settings')
+  saveExportSettings(
+    @Body() dto: UpdateExportSettingsDto,
+    @CurrentAdmin() admin: Admin,
+    @Query('workers') workers?: string,
+  ) {
+    return this.exportSettings.save(dto.fields, workers === 'true', admin.id);
+  }
+
+  @UseGuards(AdminGuard, PlanGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
+  @HttpCode(HttpStatus.OK)
+  @Post('export-email')
+  async exportMembers(
+    @Body() dto: ExportMembersEmailDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    await this.memberService.emailExport(dto, admin);
+  }
+
+  @UseGuards(AdminGuard, PlanGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
+  @HttpCode(HttpStatus.OK)
+  @Post('workers/export-email')
+  async exportWorkers(
+    @Body() dto: ExportWorkersEmailDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    await this.memberService.emailExport(dto, admin, true);
   }
 
   @UseGuards(JwtAuthGuard)
