@@ -1,3 +1,4 @@
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,10 +23,12 @@ export class NetworkEventsScheduler {
     private readonly cache: CacheService,
     private readonly share: NetworkShareService,
     private readonly closures: NetworkClosureService,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   @Cron('30 3 * * *', { timeZone: CHURCH_TIMEZONE })
   async refreshAll(): Promise<void> {
+    if (await this.accounts.networksOff()) return;
     if (!(await this.cache.acquireLock(LOCK, 900))) return;
     try {
       const tenants = await this.tenantRepo.find({
@@ -33,6 +36,7 @@ export class NetworkEventsScheduler {
         select: { id: true },
       });
       for (const t of tenants) {
+        if (!(await this.accounts.isNetworkOnFor(t.id))) continue;
         await this.share.queueEventsCopy(t.id);
         await this.share.queueRollupNow(t.id);
       }

@@ -130,7 +130,7 @@ describe('NetworkService', () => {
     ),
     recordEvent: jest.fn(),
   };
-  const accounts = { readModeOn: jest.fn().mockResolvedValue(true) };
+  const accounts = { isNetworkOn: jest.fn().mockResolvedValue(true) };
   const settings = { getNumber: jest.fn().mockResolvedValue(5) };
   const auditLog = { log: jest.fn() };
   const cache = {
@@ -165,7 +165,7 @@ describe('NetworkService', () => {
     jest.clearAllMocks();
     rows = network();
     current = 'abc';
-    accounts.readModeOn.mockResolvedValue(true);
+    accounts.isNetworkOn.mockResolvedValue(true);
     settings.getNumber.mockResolvedValue(5);
   });
 
@@ -176,7 +176,7 @@ describe('NetworkService', () => {
 
   describe('view', () => {
     it('shows nothing while the switch is off', async () => {
-      accounts.readModeOn.mockResolvedValue(false);
+      accounts.isNetworkOn.mockResolvedValue(false);
       const v = await service.view(owner);
       expect(v.available).toBe(false);
       expect(v.nodes).toEqual([]);
@@ -271,7 +271,7 @@ describe('NetworkService', () => {
       await expect(service.addBranch(notOwner, dto)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
-      accounts.readModeOn.mockResolvedValue(false);
+      accounts.isNetworkOn.mockResolvedValue(false);
       await expect(service.addBranch(owner, dto)).rejects.toBeInstanceOf(
         NotFoundException,
       );
@@ -350,7 +350,7 @@ describe('NetworkService', () => {
       rows = [church({ id: 'solo' })];
       current = 'solo';
       await expect(service.publicNetwork()).resolves.toEqual({ network: null });
-      accounts.readModeOn.mockResolvedValue(false);
+      accounts.isNetworkOn.mockResolvedValue(false);
       await expect(service.publicNetwork()).resolves.toEqual({ network: null });
     });
 

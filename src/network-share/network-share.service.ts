@@ -33,9 +33,7 @@ export class NetworkShareService {
   ) {}
 
   async assertCanShare(): Promise<void> {
-    if (
-      !(await this.accounts.readModeOn(PlatformSettingKey.CHURCH_NETWORK_MODE))
-    ) {
+    if (!(await this.accounts.isNetworkOn())) {
       throw new BadRequestException('Church networks are not available yet.');
     }
     const hasBranches = await this.tenantRepo.exists({
@@ -67,7 +65,7 @@ export class NetworkShareService {
   // Any change to a networked church's events: one delayed re-copy, however many edits land before it runs.
   async eventsChanged(): Promise<void> {
     const tenantId = this.cls.get('tenantId');
-    if (!tenantId || !(await this.networkRootOf(tenantId))) return;
+    if (!tenantId || !(await this.onFor(tenantId))) return;
     await this.queueEventsCopy(tenantId);
   }
 
@@ -94,7 +92,7 @@ export class NetworkShareService {
   // and later ones inside that wait cost a single Redis check.
   async rollupChanged(): Promise<void> {
     const tenantId = this.cls.get('tenantId');
-    if (!tenantId || !(await this.networkRootOf(tenantId))) return;
+    if (!tenantId || !(await this.onFor(tenantId))) return;
     const minutes = await this.platformSettings.getNumber(
       PlatformSettingKey.NETWORK_ROLLUP_WAIT_MINUTES,
     );
@@ -124,6 +122,15 @@ export class NetworkShareService {
         removeOnComplete: true,
         removeOnFail: true,
       },
+    );
+  }
+
+  // Saves only queue network work while networks are on for this church and it's in one; at 0 this is one cached read.
+  private async onFor(tenantId: string): Promise<boolean> {
+    if (await this.accounts.networksOff()) return false;
+    return (
+      !!(await this.networkRootOf(tenantId)) &&
+      this.accounts.isNetworkOnFor(tenantId)
     );
   }
 

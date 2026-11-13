@@ -41,6 +41,13 @@ const ENV_DEFAULTS: Partial<
   },
 };
 
+// One Discuva sign-in, then Global Profile, then Church networks.
+const SWITCH_ORDER: PlatformSettingKey[] = [
+  PlatformSettingKey.DISCUVA_ACCOUNT_MODE,
+  PlatformSettingKey.DISCUVA_PROFILE_MODE,
+  PlatformSettingKey.CHURCH_NETWORK_MODE,
+];
+
 @Injectable()
 export class PlatformSettingsService {
   private readonly CACHE_TTL = 300;
@@ -126,6 +133,7 @@ export class PlatformSettingsService {
         `${known.label} must be between ${known.min} and ${known.max} (${known.unit}).`,
       );
     }
+    await this.assertSwitchOrder(key, dto.value);
 
     let row = await this.settingRepo.findOne({ where: { key } });
     if (!row) {
@@ -145,6 +153,30 @@ export class PlatformSettingsService {
       max: known.max,
       type: known.type ?? 'number',
     };
+  }
+
+  // Each switch builds on the one before it: a later one can't be set above an earlier one, or an earlier one below a later one.
+  private async assertSwitchOrder(
+    key: PlatformSettingKey,
+    value: number,
+  ): Promise<void> {
+    const at = SWITCH_ORDER.indexOf(key);
+    if (at === -1) return;
+    for (const [i, other] of SWITCH_ORDER.entries()) {
+      if (i === at) continue;
+      const current = await this.getNumber(other);
+      const label = KNOWN_PLATFORM_SETTINGS[other].label;
+      if (i < at && current < value) {
+        throw new BadRequestException(
+          `Set ${label} to ${value} or more first: ${KNOWN_PLATFORM_SETTINGS[key].label} builds on it.`,
+        );
+      }
+      if (i > at && current > value) {
+        throw new BadRequestException(
+          `Set ${label} to ${value} or less first: it builds on ${KNOWN_PLATFORM_SETTINGS[key].label}.`,
+        );
+      }
+    }
   }
 
   async getSubscriptionGracePeriodDays(): Promise<number> {
