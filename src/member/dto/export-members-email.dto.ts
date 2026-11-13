@@ -1,5 +1,10 @@
+import { MEMBER_EXPORT_FIELD_KEYS } from '../utility/member-csv';
 import {
   IsBoolean,
+  IsArray,
+  IsIn,
+  ArrayMaxSize,
+  ArrayUnique,
   IsEmail,
   IsEnum,
   IsOptional,
@@ -11,6 +16,13 @@ import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 
 class ExportPeopleEmailDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(32)
+  @ArrayUnique()
+  @IsIn(MEMBER_EXPORT_FIELD_KEYS, { each: true })
+  fields?: string[];
+
   @IsOptional()
   @IsEmail()
   recipientEmail?: string;

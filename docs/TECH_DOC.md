@@ -23703,7 +23703,26 @@ queueing fail explicitly; `REPORT_EXPORTED` records the actor, recipient and
 filters only after queue success. No direct-download routes remain. CSV has a
 BOM, CRLF records and quoted/escaped cells.
 
-Columns include member ID, names, email, phone, role, member status, gender,
+`GET /v1/members/export-fields?workers=true|false` (MEMBERS_READ) returns the
+export field catalogue as `{ key, label, required }[]` in the standard envelope.
+It reads static metadata, with no database queries. Both email endpoints accept
+optional `fields: string[]` (at most 32 unique supported field keys). An omitted
+or empty array exports only core columns. Unsupported keys and duplicates are
+rejected. Column order follows the catalogue regardless of selection order.
+Core columns are member ID, first/last name, email, phone, role and member status;
+workers always also include primary department and worker status. All other
+columns are optional, including emergency contacts. The portal loads this
+catalogue on opening the shared email dialog and offers individual checkboxes,
+Select all and Clear optional fields. Required fields are displayed as text and
+cannot be removed. The export query selects only required/chosen values and
+relation IDs needed for hydration; row filters and 500-row batches are unchanged.
+
+Emergency contact name, phone and relationship are edited in the member app's
+Edit Profile screen (`PATCH /v1/members/me`), and displayed in My Account and the
+admin member detail panel. `UpdateMemberDto` also accepts them for admin API
+updates; there is no new emergency-contact editing screen in this change.
+
+Available columns include member ID, names, email, phone, role, member status, gender,
 separate birthday day/month/year (unknown parts stay blank), marital status,
 spouse name, address, emergency contact name/phone/relationship, church joining,
 born-again and baptism dates, Holy Ghost baptism, clergy title, serving interest,

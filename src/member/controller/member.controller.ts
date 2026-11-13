@@ -1,3 +1,4 @@
+import { memberExportFields } from '../utility/member-csv';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { PlanGuard } from '../../billing/guard/plan.guard';
@@ -121,6 +122,13 @@ export class MemberController {
       isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
     });
     return UtilityService.getPaginationResponseDto(result, MemberDto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('export-fields')
+  getExportFields(@Query('workers') workers?: string) {
+    return memberExportFields(workers === 'true');
   }
 
   @UseGuards(AdminGuard, PlanGuard)

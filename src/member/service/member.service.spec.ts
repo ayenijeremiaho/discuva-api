@@ -1900,6 +1900,37 @@ describe('MemberService', () => {
       },
     );
 
+    it('applies optional fields to both the query and the CSV attachment', async () => {
+      const qb: any = {};
+      for (const method of [
+        'leftJoinAndSelect',
+        'leftJoin',
+        'select',
+        'orderBy',
+        'clone',
+        'limit',
+      ])
+        qb[method] = jest.fn().mockReturnValue(qb);
+      qb.getMany = jest.fn().mockResolvedValue([
+        {
+          id: 'm1',
+          firstname: 'Ada',
+          emergencyContactName: 'Grace',
+          birthYear: 1990,
+        },
+      ]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      const csv = await service.exportCsv({ fields: ['emergencyContactName'] });
+      expect(csv).toContain('"Emergency Contact Name"');
+      expect(csv).toContain('"Grace"');
+      expect(csv).not.toContain('Birth Year');
+      expect(csv).not.toContain('1990');
+      expect(qb.select.mock.calls[0][0]).toContain(
+        'member.emergencyContactName',
+      );
+      expect(qb.select.mock.calls[0][0]).not.toContain('member.birthYear');
+    });
+
     it('uses the workers query including former workers and secondary departments', async () => {
       const qb: any = {};
       for (const method of [

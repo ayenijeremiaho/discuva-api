@@ -1,7 +1,81 @@
-import { csvCell, memberCsvHeader, memberCsvRow } from './member-csv';
+import {
+  csvCell,
+  memberCsvHeader,
+  memberCsvRow,
+  memberExportFields,
+  memberExportSelect,
+} from './member-csv';
 import { Member } from '../entity/member.entity';
 
 describe('member CSV', () => {
+  it('keeps core columns and only adds chosen fields', () => {
+    const header = memberCsvHeader([
+      'emergencyContactName',
+      'emergencyContactPhone',
+    ]);
+    expect(header).toContain(
+      '"Member ID","First Name","Last Name","Email","Phone Number","Role","Member Status"',
+    );
+    expect(header).toContain(
+      '"Emergency Contact Name","Emergency Contact Phone"',
+    );
+    expect(header).not.toContain('Birth Year');
+    expect(header).not.toContain('Profession');
+    expect(
+      memberCsvRow({ id: 'm1', emergencyContactName: 'Ada' } as Member, [
+        'emergencyContactName',
+      ]),
+    ).toContain('"Ada"');
+  });
+
+  it('always includes the worker department and status', () => {
+    expect(memberCsvHeader([], true)).toContain(
+      '"Primary Department","Worker Status"',
+    );
+    expect(
+      memberExportFields(true)
+        .filter((f) => f.required)
+        .map((f) => f.key),
+    ).toEqual([
+      'id',
+      'firstname',
+      'lastname',
+      'email',
+      'phoneNumber',
+      'role',
+      'status',
+      'department',
+      'workerStatus',
+    ]);
+  });
+
+  it('selects only chosen export data and required relation IDs', () => {
+    const select = memberExportSelect(
+      ['emergencyContactPhone', 'secondaryDepartment'],
+      true,
+    );
+    expect(select).toEqual(
+      expect.arrayContaining([
+        'member.id',
+        'member.email',
+        'member.emergencyContactPhone',
+        'profile.id',
+        'profile.status',
+        'department.name',
+        'secondaryDepartment.name',
+      ]),
+    );
+    expect(select).not.toContain('member.emergencyContactName');
+    expect(select).not.toContain('member.birthYear');
+    expect(select).not.toContain('profile.profession');
+    expect(memberExportSelect(['password', 'deviceId'])).not.toContain(
+      'member.password',
+    );
+    expect(memberExportSelect(['password', 'deviceId'])).not.toContain(
+      'member.deviceId',
+    );
+  });
+
   it('quotes commas, newlines and quotes without losing Unicode', () => {
     expect(csvCell('Adé, "Hello"\nLagos')).toBe('"Adé, ""Hello""\nLagos"');
   });
