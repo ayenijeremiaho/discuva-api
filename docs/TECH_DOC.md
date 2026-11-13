@@ -23682,3 +23682,92 @@ wording is sent as written.
 **Database cost:** one small root table written only on console saves. A module cache miss adds two cached lookups (the tenant's type and the type's
 profile), each reading the database at most once per 5 minutes.
 
+
+### Member and worker CSV exports (2026-11-13)
+
+Admin `MEMBERS_READ` and the existing `BULK_EXPORT` plan feature are required
+for `POST /v1/members/export-email` and `POST /v1/members/workers/export-email`.
+Both accept a JSON body with an optional validated `recipientEmail`, defaulting
+to the authenticated admin's member email. Member filters: `role`, `status`,
+`search`, `wantsToServe` (boolean). Worker filters: `status`, `departmentId` (UUID),
+`search`, `isTrainee` (boolean). Filters use the same query builders as the lists,
+including inactive former workers and secondary departments. No pagination:
+all matching records are exported, ordered by member ID.
+
+The portal reuses `EmailReportButton` with an "Email CSV" label, recipient dialog,
+queue confirmation and retry on failure. The API builds the CSV then queues it
+as a UTF-8 attachment through `EmailQueueService`, using `report-export` and the
+church timezone. It returns HTTP 200 after successful queueing (delivery happens
+through the existing worker and retries). Missing recipients or suppressed email
+queueing fail explicitly; `REPORT_EXPORTED` records the actor, recipient and
+filters only after queue success. No direct-download routes remain. CSV has a
+BOM, CRLF records and quoted/escaped cells.
+
+`GET /v1/members/export-fields?workers=true|false` (MEMBERS_READ) returns the
+export field catalogue as `{ key, label, required }[]` in the standard envelope.
+It reads static metadata, with no database queries. Both email endpoints accept
+optional `fields: string[]` (at most 32 unique supported field keys). An empty array exports only core columns. Omitting the array uses the saved
+organisation defaults for that export type (core-only until configured). Unsupported keys and duplicates are
+rejected. Column order follows the catalogue regardless of selection order.
+Core columns are member ID, first/last name, email, phone, role and member status;
+workers always also include primary department and worker status. All other
+columns are optional, including emergency contacts. The portal loads this
+catalogue on opening the shared email dialog and offers individual checkboxes,
+Select all and Clear optional fields. Required fields are displayed as text and
+cannot be removed. The export query selects only required/chosen values and
+relation IDs needed for hydration; row filters and 500-row batches are unchanged.
+
+Shared organisation defaults: `GET /v1/members/export-settings?workers=true|false`
+requires MEMBERS_READ and returns `{ fields: string[] }`. `PATCH` on the same
+route requires MEMBERS_WRITE and a JSON `{ fields: string[] }` body. The array is
+required, unique and restricted to supported export field keys. Core fields are
+removed from stored selections because they are always included. Saves are
+atomic upserts into existing tenant `church_settings`, with separate unique
+keys `member-export:members` and `member-export:workers`. Empty selections save a
+core-only default. Changes are audited as CHURCH_SETTING_UPDATED. No migration
+is needed; the existing unique key index supports reads/upserts.
+
+The dialog reloads shared defaults on each open. Save as default is available to
+admins with member-edit permission; it updates this export type for all admins
+and devices. One-off changes and sending an export never overwrite defaults.
+Use saved defaults restores the last loaded/saved selection. Member and worker
+configurations are independent; workers still always include primary department
+and worker status. Saved settings cache for 300 seconds, scoped to the tenant by
+CacheService, and the matching cache key is invalidated on save. One indexed
+settings read on cache miss and one upsert per explicit save; no polling or new
+scheduled jobs. Opening the dialog adds one settings API request. Email export
+reads saved defaults only when the caller omits `fields`; explicit selections
+continue to require no settings lookup.
+
+Emergency contact name, phone and relationship are edited in the member app's
+Edit Profile screen (`PATCH /v1/members/me`), and displayed in My Account and the
+admin member detail panel. `UpdateMemberDto` also accepts them for admin API
+updates; there is no new emergency-contact editing screen in this change.
+
+Available columns include member ID, names, email, phone, role, member status, gender,
+separate birthday day/month/year (unknown parts stay blank), marital status,
+spouse name, address, emergency contact name/phone/relationship, church joining,
+born-again and baptism dates, Holy Ghost baptism, clergy title, serving interest,
+primary/secondary departments, worker status, trainee status, profession,
+workforce joining date, SOD/Bible College completion and record creation date.
+Dates use YYYY-MM-DD, booleans use Yes/No, and missing values are blank. Potential
+spreadsheet formulas (including international phone numbers beginning with +)
+receive a leading apostrophe. Authentication fields, device IDs, global account
+IDs and internal preferences are never selected or exported.
+
+Database cost: one on-demand query per 500 records (plus a final empty query for
+exact multiples), no COUNT queries, N+1 queries, scheduled jobs or migrations.
+Queries reuse the existing list joins and filter indexes; ID keyset pagination
+uses the existing members primary key. Only export columns and relation IDs are
+selected. The final CSV is assembled in request memory before sending so query
+errors cannot deliver a partial successful download. Email delivery adds one job to the existing Redis/Bull email queue per export,
+plus the existing email-template/settings and delivery/audit bookkeeping. No new
+queue or scheduler. Production deployment remains a separate release step.
+
+Export configuration indexing and UI review (2026-11-13): see
+[EXPORT_CONFIGURATION_REVIEW.md](EXPORT_CONFIGURATION_REVIEW.md) for verified
+local PostgreSQL read/upsert plans and the existing unique-index definition.
+The shared email dialog now uses portal theme variables throughout, keeps its
+header/Send footer visible around scrollable content, and supports labelled
+recipient input, focus trapping, Escape close and focus restoration. This UI
+change adds no database queries, migrations or scheduled work.

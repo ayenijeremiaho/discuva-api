@@ -1,3 +1,7 @@
+import { MemberExportSettingsService } from './member-export-settings.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { Admin } from '../../admin/entity/admin.entity';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -76,6 +80,10 @@ const mockUtilityService = {
   resolveChurchName: jest.fn(),
 };
 
+const mockExportSettings = { get: jest.fn().mockResolvedValue({ fields: [] }) };
+const mockEmailQueue = {
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
+};
 const mockAuditLogService = { log: jest.fn() };
 
 const mockSessionService = { updateLogout: jest.fn() };
@@ -119,6 +127,7 @@ describe('MemberService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockExportSettings.get.mockResolvedValue({ fields: [] });
     mockUtilityService.resolveChurchName.mockResolvedValue('Test Church');
 
     const module: TestingModule = await Test.createTestingModule({
@@ -131,6 +140,15 @@ describe('MemberService', () => {
           },
         },
         MemberService,
+        {
+          provide: MemberExportSettingsService,
+          useValue: mockExportSettings,
+        },
+        { provide: EmailQueueService, useValue: mockEmailQueue },
+        {
+          provide: ChurchTimezoneService,
+          useValue: { get: jest.fn().mockResolvedValue('UTC') },
+        },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         {
           provide: getRepositoryToken(WorkerProfile),
@@ -1737,6 +1755,237 @@ describe('MemberService', () => {
       await expect(service.setServeInterest('member-1', true)).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('email export', () => {
+    const admin = {
+      id: 'admin-1',
+      member: { email: 'admin@example.test' },
+    } as Admin;
+    beforeEach(() => {
+      jest
+        .spyOn(service, 'exportCsv')
+        .mockResolvedValue('\uFEFF"First Name"\r\n"Ada"\r\n');
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockResolvedValue(
+        'job-1',
+      );
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it('queues a CSV to the requesting admin and records the recipient', async () => {
+      await service.emailExport({ search: 'Ada' }, admin);
+      expect(
+        mockEmailQueue.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        admin.member.email,
+        'Your Members CSV Export',
+        'report-export',
+        expect.objectContaining({
+          reportTitle: 'Members (CSV)',
+          filterSummary: 'Search: Ada',
+        }),
+        [
+          {
+            filename: expect.stringMatching(/^members-.*\.csv$/),
+            content: Buffer.from('\uFEFF"First Name"\r\n"Ada"\r\n', 'utf8'),
+          },
+        ],
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'REPORT_EXPORTED',
+        expect.objectContaining({
+          actorId: admin.id,
+          targetEmail: admin.member.email,
+        }),
+      );
+    });
+
+    it('uses saved defaults when fields are omitted and preserves explicit one-off choices', async () => {
+      mockExportSettings.get.mockResolvedValue({ fields: ['profession'] });
+      await service.emailExport({}, admin, true);
+      expect(service.exportCsv).toHaveBeenCalledWith(
+        expect.objectContaining({ fields: ['profession'], workers: true }),
+      );
+      expect(mockExportSettings.get).toHaveBeenCalledWith(true);
+      mockExportSettings.get.mockClear();
+      await service.emailExport({ fields: [] }, admin, true);
+      expect(service.exportCsv).toHaveBeenLastCalledWith(
+        expect.objectContaining({ fields: [] }),
+      );
+      expect(mockExportSettings.get).not.toHaveBeenCalled();
+    });
+
+    it('uses the chosen recipient and worker filters', async () => {
+      await service.emailExport(
+        {
+          recipientEmail: 'other@example.test',
+          status: WorkerStatusEnum.INACTIVE,
+          isTrainee: false,
+        },
+        admin,
+        true,
+      );
+      expect(service.exportCsv).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workers: true,
+          status: undefined,
+          workerStatus: WorkerStatusEnum.INACTIVE,
+          isTrainee: false,
+        }),
+      );
+      expect(
+        mockEmailQueue.queueEmailWithTemplateAndAttachments.mock.calls[0][0],
+      ).toBe('other@example.test');
+    });
+
+    it('rejects a missing recipient before querying', async () => {
+      await expect(
+        service.emailExport({}, { id: 'admin-2' } as Admin),
+      ).rejects.toThrow('No recipient email');
+      expect(service.exportCsv).not.toHaveBeenCalled();
+    });
+
+    it('does not report success or audit an email that could not be queued', async () => {
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockResolvedValue('');
+      await expect(service.emailExport({}, admin)).rejects.toThrow(
+        'could not be queued',
+      );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+    });
+
+    it('propagates queue failures without recording success', async () => {
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockRejectedValueOnce(
+        new Error('Redis down'),
+      );
+      await expect(service.emailExport({}, admin)).rejects.toThrow(
+        'Redis down',
+      );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('CSV export', () => {
+    it.each([false, true])(
+      'exports all 1,201 filtered records (workers=%s)',
+      async (workers) => {
+        const rows = Array.from({ length: 1201 }, (_, i) => ({
+          id: `id-${i}`,
+          firstname: `Person ${i}`,
+        }));
+        const qb: any = {};
+        for (const method of [
+          'innerJoinAndSelect',
+          'where',
+          'leftJoinAndSelect',
+          'leftJoin',
+          'select',
+          'orderBy',
+          'andWhere',
+          'clone',
+          'limit',
+        ]) {
+          qb[method] = jest.fn().mockReturnValue(qb);
+        }
+        qb.getMany = jest
+          .fn()
+          .mockResolvedValueOnce(rows.slice(0, 500))
+          .mockResolvedValueOnce(rows.slice(500, 1000))
+          .mockResolvedValueOnce(rows.slice(1000));
+        mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+        const csv = await service.exportCsv({
+          workers,
+          role: MemberRoleEnum.MEMBER,
+          search: 'Person',
+          wantsToServe: true,
+        });
+        expect(csv.startsWith('\uFEFF')).toBe(true);
+        expect(csv.split('\r\n')).toHaveLength(1203);
+        expect(qb.getMany).toHaveBeenCalledTimes(3);
+        for (const row of rows)
+          expect(csv).toContain(`"${row.id}","${row.firstname}"`);
+        expect(qb.andWhere).toHaveBeenCalledWith('member.id > :cursor', {
+          cursor: 'id-999',
+        });
+        expect(qb.andWhere).toHaveBeenCalledWith('member.id > :cursor', {
+          cursor: 'id-499',
+        });
+        if (!workers) {
+          expect(qb.andWhere).toHaveBeenCalledWith('member.role = :role', {
+            role: MemberRoleEnum.MEMBER,
+          });
+          expect(qb.andWhere).toHaveBeenCalledWith(
+            'member.serveInterestAt IS NOT NULL',
+          );
+        }
+        expect(qb.select.mock.calls[0][0]).not.toContain('member.password');
+      },
+    );
+
+    it('applies optional fields to both the query and the CSV attachment', async () => {
+      const qb: any = {};
+      for (const method of [
+        'leftJoinAndSelect',
+        'leftJoin',
+        'select',
+        'orderBy',
+        'clone',
+        'limit',
+      ])
+        qb[method] = jest.fn().mockReturnValue(qb);
+      qb.getMany = jest.fn().mockResolvedValue([
+        {
+          id: 'm1',
+          firstname: 'Ada',
+          emergencyContactName: 'Grace',
+          birthYear: 1990,
+        },
+      ]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      const csv = await service.exportCsv({ fields: ['emergencyContactName'] });
+      expect(csv).toContain('"Emergency Contact Name"');
+      expect(csv).toContain('"Grace"');
+      expect(csv).not.toContain('Birth Year');
+      expect(csv).not.toContain('1990');
+      expect(qb.select.mock.calls[0][0]).toContain(
+        'member.emergencyContactName',
+      );
+      expect(qb.select.mock.calls[0][0]).not.toContain('member.birthYear');
+    });
+
+    it('uses the workers query including former workers and secondary departments', async () => {
+      const qb: any = {};
+      for (const method of [
+        'innerJoinAndSelect',
+        'leftJoinAndSelect',
+        'leftJoin',
+        'select',
+        'where',
+        'andWhere',
+        'orderBy',
+        'clone',
+        'limit',
+      ]) {
+        qb[method] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getMany = jest.fn().mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      const csv = await service.exportCsv({
+        workers: true,
+        workerStatus: WorkerStatusEnum.INACTIVE,
+        departmentId: 'dept',
+        isTrainee: false,
+      });
+      expect(qb.where.mock.calls[0][0]).toContain('profile.status = :inactive');
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(department.id = :departmentId OR secondaryDepartment.id = :departmentId)',
+        { departmentId: 'dept' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'profile.isTrainee = :isTrainee',
+        { isTrainee: false },
+      );
+      expect(csv.split('\r\n')).toHaveLength(2);
     });
   });
 

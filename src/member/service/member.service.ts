@@ -1,3 +1,16 @@
+import { MemberExportSettingsService } from './member-export-settings.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { Admin } from '../../admin/entity/admin.entity';
+import {
+  ExportMembersEmailDto,
+  ExportWorkersEmailDto,
+} from '../dto/export-members-email.dto';
+import {
+  memberExportSelect,
+  memberCsvHeader,
+  memberCsvRow,
+} from '../utility/member-csv';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
@@ -83,6 +96,9 @@ export class MemberService {
     private readonly accounts: DiscuvaAccountService,
     private readonly profiles: DiscuvaProfileService,
     private readonly photoRemovals: PhotoRemovalService,
+    private readonly emailQueue: EmailQueueService,
+    private readonly churchTimezone: ChurchTimezoneService,
+    private readonly exportSettings: MemberExportSettingsService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -1482,6 +1498,20 @@ export class MemberService {
   ): Promise<PaginationResponseDto<Member>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
+    const qb = this.membersQuery(role, search, wantsToServe, status)
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [members, total] = await qb.getManyAndCount();
+    return UtilityService.createPaginationResponse(members, page, limit, total);
+  }
+
+  private membersQuery(
+    role?: MemberRoleEnum,
+    search?: string,
+    wantsToServe?: boolean,
+    status?: MemberStatusEnum,
+  ) {
     const qb = this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.workerProfile', 'workerProfile')
@@ -1492,9 +1522,7 @@ export class MemberService {
       )
       .leftJoinAndSelect('member.clergy', 'clergy')
       .leftJoinAndSelect('clergy.title', 'clergyTitle')
-      .orderBy('member.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+      .orderBy('member.createdAt', 'DESC');
 
     if (role) qb.andWhere('member.role = :role', { role });
     if (status) qb.andWhere('member.status = :status', { status });
@@ -1511,8 +1539,7 @@ export class MemberService {
       );
     }
 
-    const [members, total] = await qb.getManyAndCount();
-    return UtilityService.createPaginationResponse(members, page, limit, total);
+    return qb;
   }
 
   // Narrow, bounded, minimal-field search — built specifically for the
@@ -1555,8 +1582,25 @@ export class MemberService {
       isTrainee?: boolean;
     } = {},
   ): Promise<PaginationResponseDto<Member>> {
-    const { status, departmentId, search, isTrainee } = filters;
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
+    const qb = this.workersQuery(filters);
+
+    const [members, total] = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('member.createdAt', 'DESC')
+      .getManyAndCount();
+
+    return UtilityService.createPaginationResponse(members, page, limit, total);
+  }
+
+  private workersQuery(filters: {
+    status?: WorkerStatusEnum;
+    departmentId?: string;
+    search?: string;
+    isTrainee?: boolean;
+  }) {
+    const { status, departmentId, search, isTrainee } = filters;
 
     const qb = this.memberRepository
       .createQueryBuilder('member')
@@ -1602,13 +1646,120 @@ export class MemberService {
       );
     }
 
-    const [members, total] = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .orderBy('member.createdAt', 'DESC')
-      .getManyAndCount();
+    return qb;
+  }
 
-    return UtilityService.createPaginationResponse(members, page, limit, total);
+  async emailExport(
+    dto: ExportMembersEmailDto | ExportWorkersEmailDto,
+    admin: Admin,
+    workers = false,
+  ): Promise<void> {
+    const recipient = dto.recipientEmail ?? admin.member?.email;
+    if (!recipient) {
+      throw new BadRequestException(
+        'No recipient email available — provide recipientEmail explicitly.',
+      );
+    }
+    const filters = { ...dto };
+    delete filters.recipientEmail;
+    filters.fields =
+      dto.fields ?? (await this.exportSettings.get(workers)).fields;
+    const csv = await this.exportCsv({
+      ...filters,
+      workers,
+      status: workers ? undefined : (dto as ExportMembersEmailDto).status,
+      workerStatus: workers ? (dto as ExportWorkersEmailDto).status : undefined,
+    });
+    const name = workers ? 'workers' : 'members';
+    const title = workers ? 'Workers' : 'Members';
+    const filterSummary = [
+      dto.search ? `Search: ${dto.search}` : null,
+      dto.status
+        ? `Status: ${dto.status.toLowerCase().replace(/_/g, ' ')}`
+        : null,
+      workers && (dto as ExportWorkersEmailDto).departmentId
+        ? 'Selected department'
+        : null,
+      workers && (dto as ExportWorkersEmailDto).isTrainee !== undefined
+        ? (dto as ExportWorkersEmailDto).isTrainee
+          ? 'Trainees only'
+          : 'Non-trainees only'
+        : null,
+      !workers && (dto as ExportMembersEmailDto).role
+        ? `Role: ${(dto as ExportMembersEmailDto).role.toLowerCase()}`
+        : null,
+      !workers && (dto as ExportMembersEmailDto).wantsToServe
+        ? 'Interested in serving'
+        : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const jobId = await this.emailQueue.queueEmailWithTemplateAndAttachments(
+      recipient,
+      `Your ${title} CSV Export`,
+      'report-export',
+      {
+        reportTitle: `${title} (CSV)`,
+        generatedAt: new Date().toLocaleString('en-GB', {
+          timeZone: await this.churchTimezone.get(),
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        filterSummary: filterSummary || null,
+      },
+      [
+        {
+          filename: `${name}-${new Date().toISOString().slice(0, 10)}.csv`,
+          content: Buffer.from(csv, 'utf8'),
+        },
+      ],
+    );
+    if (!jobId)
+      throw new BadRequestException(
+        'The export email could not be queued. Please check your email settings and allowance.',
+      );
+    this.auditLogService.log('REPORT_EXPORTED', {
+      actorId: admin.id,
+      targetEmail: recipient,
+      metadata: { report: name, format: 'csv', filters },
+    });
+  }
+
+  async exportCsv(filters: {
+    workers?: boolean;
+    role?: MemberRoleEnum;
+    status?: MemberStatusEnum;
+    workerStatus?: WorkerStatusEnum;
+    departmentId?: string;
+    search?: string;
+    isTrainee?: boolean;
+    wantsToServe?: boolean;
+    fields?: string[];
+  }): Promise<string> {
+    const qb = filters.workers
+      ? this.workersQuery({ ...filters, status: filters.workerStatus })
+      : this.membersQuery(
+          filters.role,
+          filters.search,
+          filters.wantsToServe,
+          filters.status,
+        );
+    const fields = filters.fields ?? [];
+    qb.leftJoin('member.spouse', 'spouse').select(
+      memberExportSelect(fields, filters.workers),
+    );
+    const lines = [memberCsvHeader(fields, filters.workers)];
+    let cursor: string | undefined;
+    while (true) {
+      const batch = qb.clone().orderBy('member.id', 'ASC').limit(500);
+      if (cursor) batch.andWhere('member.id > :cursor', { cursor });
+      const members = await batch.getMany();
+      for (const member of members)
+        lines.push(memberCsvRow(member, fields, filters.workers));
+      if (members.length < 500) break;
+      cursor = members[members.length - 1].id;
+    }
+    return '\uFEFF' + lines.join('\r\n') + '\r\n';
   }
 
   // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
