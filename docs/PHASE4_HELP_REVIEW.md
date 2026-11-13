@@ -14,7 +14,7 @@ settings; this review does not switch anything on or publish Stage 4.
 | Admin Church Network Help | Eligibility and rollout prerequisites, stable addresses, level labels, giving sharing, aggregate figures, overseers, read-only limits, closing and cancellation |
 | Admin Network Report Help | Dedicated exact-route entry; month/snapshot freshness, small-count masking, per-100 figures, median, attention thresholds, final months and emailed reports |
 | Admin Network Agenda Help | Dedicated exact-route entry; week/branch filters and marked shared events |
-| Member searchable FAQ | Network app branch choice versus membership move; worker release; arriving as a member; retained history; visitor location/venue code; attendance elsewhere; copied events; closures; optional move suggestions |
+| Member searchable FAQ | Network app branch choice versus membership move; worker release; sign-in/admin-access prerequisites; cancelling a pending request; arriving as a member; retained history; visitor location/venue code; attendance elsewhere; copied events; closures; optional move suggestions |
 | Member profile FAQ | Saving profile changes and editing/clearing emergency contact details |
 | Existing app tour | Reviewed: generic navigation, More, account preferences and searchable FAQ/replay remain accurate; network actions are explained in the FAQ rather than adding steps for users without networks |
 | Platform console | Existing Networks inline help states structure/figures only and points staff to Church Networks under Platform Settings; technical rollout/limits remain in TECH_DOC and the Stage 4 design note |
