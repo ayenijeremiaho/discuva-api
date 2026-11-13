@@ -1,3 +1,8 @@
+import {
+  MEMBER_EXPORT_SELECT,
+  memberCsvHeader,
+  memberCsvRow,
+} from '../utility/member-csv';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
@@ -1630,6 +1635,20 @@ export class MemberService {
   ): Promise<PaginationResponseDto<Member>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
+    const qb = this.membersQuery(role, search, wantsToServe, status)
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [members, total] = await qb.getManyAndCount();
+    return UtilityService.createPaginationResponse(members, page, limit, total);
+  }
+
+  private membersQuery(
+    role?: MemberRoleEnum,
+    search?: string,
+    wantsToServe?: boolean,
+    status?: MemberStatusEnum,
+  ) {
     const qb = this.memberRepository
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.workerProfile', 'workerProfile')
@@ -1640,9 +1659,7 @@ export class MemberService {
       )
       .leftJoinAndSelect('member.clergy', 'clergy')
       .leftJoinAndSelect('clergy.title', 'clergyTitle')
-      .orderBy('member.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+      .orderBy('member.createdAt', 'DESC');
 
     if (role) qb.andWhere('member.role = :role', { role });
     if (status) qb.andWhere('member.status = :status', { status });
@@ -1659,8 +1676,7 @@ export class MemberService {
       );
     }
 
-    const [members, total] = await qb.getManyAndCount();
-    return UtilityService.createPaginationResponse(members, page, limit, total);
+    return qb;
   }
 
   // Narrow, bounded, minimal-field search — built specifically for the
@@ -1703,8 +1719,25 @@ export class MemberService {
       isTrainee?: boolean;
     } = {},
   ): Promise<PaginationResponseDto<Member>> {
-    const { status, departmentId, search, isTrainee } = filters;
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
+    const qb = this.workersQuery(filters);
+
+    const [members, total] = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('member.createdAt', 'DESC')
+      .getManyAndCount();
+
+    return UtilityService.createPaginationResponse(members, page, limit, total);
+  }
+
+  private workersQuery(filters: {
+    status?: WorkerStatusEnum;
+    departmentId?: string;
+    search?: string;
+    isTrainee?: boolean;
+  }) {
+    const { status, departmentId, search, isTrainee } = filters;
 
     const qb = this.memberRepository
       .createQueryBuilder('member')
@@ -1750,13 +1783,55 @@ export class MemberService {
       );
     }
 
-    const [members, total] = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .orderBy('member.createdAt', 'DESC')
-      .getManyAndCount();
+    return qb;
+  }
 
-    return UtilityService.createPaginationResponse(members, page, limit, total);
+  async exportCsv(filters: {
+    workers?: boolean;
+    role?: MemberRoleEnum;
+    status?: MemberStatusEnum;
+    workerStatus?: WorkerStatusEnum;
+    departmentId?: string;
+    search?: string;
+    isTrainee?: boolean;
+    wantsToServe?: boolean;
+  }): Promise<string> {
+    const qb = filters.workers
+      ? this.workersQuery({ ...filters, status: filters.workerStatus })
+      : this.membersQuery(
+          filters.role,
+          filters.search,
+          filters.wantsToServe,
+          filters.status,
+        );
+    const profile = filters.workers ? 'profile' : 'workerProfile';
+    qb.leftJoin('member.spouse', 'spouse').select([
+      ...MEMBER_EXPORT_SELECT,
+      ...[
+        'id',
+        'status',
+        'profession',
+        'yearJoinedWorkforce',
+        'completedSOD',
+        'completedBibleCollege',
+        'isTrainee',
+      ].map((field) => `${profile}.${field}`),
+      'department.id',
+      'department.name',
+      'secondaryDepartment.id',
+      'secondaryDepartment.name',
+    ]);
+    const lines = [memberCsvHeader()];
+    let cursor: string | undefined;
+    while (true) {
+      const batch = qb.clone().orderBy('member.id', 'ASC').limit(500);
+      if (cursor) batch.andWhere('member.id > :cursor', { cursor });
+      const members = await batch.getMany();
+      for (const member of members) lines.push(memberCsvRow(member));
+      if (members.length < 500) break;
+      cursor = members[members.length - 1].id;
+    }
+    return '\uFEFF' + lines.join('\r\n') + '\r\n';
   }
 
   // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
