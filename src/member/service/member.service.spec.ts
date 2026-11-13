@@ -1,3 +1,6 @@
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { Admin } from '../../admin/entity/admin.entity';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -76,6 +79,9 @@ const mockUtilityService = {
   resolveChurchName: jest.fn(),
 };
 
+const mockEmailQueue = {
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
+};
 const mockAuditLogService = { log: jest.fn() };
 
 const mockSessionService = { updateLogout: jest.fn() };
@@ -131,6 +137,11 @@ describe('MemberService', () => {
           },
         },
         MemberService,
+        { provide: EmailQueueService, useValue: mockEmailQueue },
+        {
+          provide: ChurchTimezoneService,
+          useValue: { get: jest.fn().mockResolvedValue('UTC') },
+        },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         {
           provide: getRepositoryToken(WorkerProfile),
@@ -1737,6 +1748,98 @@ describe('MemberService', () => {
       await expect(service.setServeInterest('member-1', true)).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('email export', () => {
+    const admin = {
+      id: 'admin-1',
+      member: { email: 'admin@example.test' },
+    } as Admin;
+    beforeEach(() => {
+      jest
+        .spyOn(service, 'exportCsv')
+        .mockResolvedValue('\uFEFF"First Name"\r\n"Ada"\r\n');
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockResolvedValue(
+        'job-1',
+      );
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it('queues a CSV to the requesting admin and records the recipient', async () => {
+      await service.emailExport({ search: 'Ada' }, admin);
+      expect(
+        mockEmailQueue.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        admin.member.email,
+        'Your Members CSV Export',
+        'report-export',
+        expect.objectContaining({
+          reportTitle: 'Members (CSV)',
+          filterSummary: 'Search: Ada',
+        }),
+        [
+          {
+            filename: expect.stringMatching(/^members-.*\.csv$/),
+            content: Buffer.from('\uFEFF"First Name"\r\n"Ada"\r\n', 'utf8'),
+          },
+        ],
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'REPORT_EXPORTED',
+        expect.objectContaining({
+          actorId: admin.id,
+          targetEmail: admin.member.email,
+        }),
+      );
+    });
+
+    it('uses the chosen recipient and worker filters', async () => {
+      await service.emailExport(
+        {
+          recipientEmail: 'other@example.test',
+          status: WorkerStatusEnum.INACTIVE,
+          isTrainee: false,
+        },
+        admin,
+        true,
+      );
+      expect(service.exportCsv).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workers: true,
+          status: undefined,
+          workerStatus: WorkerStatusEnum.INACTIVE,
+          isTrainee: false,
+        }),
+      );
+      expect(
+        mockEmailQueue.queueEmailWithTemplateAndAttachments.mock.calls[0][0],
+      ).toBe('other@example.test');
+    });
+
+    it('rejects a missing recipient before querying', async () => {
+      await expect(
+        service.emailExport({}, { id: 'admin-2' } as Admin),
+      ).rejects.toThrow('No recipient email');
+      expect(service.exportCsv).not.toHaveBeenCalled();
+    });
+
+    it('does not report success or audit an email that could not be queued', async () => {
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockResolvedValue('');
+      await expect(service.emailExport({}, admin)).rejects.toThrow(
+        'could not be queued',
+      );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+    });
+
+    it('propagates queue failures without recording success', async () => {
+      mockEmailQueue.queueEmailWithTemplateAndAttachments.mockRejectedValueOnce(
+        new Error('Redis down'),
+      );
+      await expect(service.emailExport({}, admin)).rejects.toThrow(
+        'Redis down',
+      );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
 

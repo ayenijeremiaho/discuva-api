@@ -1,3 +1,10 @@
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { Admin } from '../../admin/entity/admin.entity';
+import {
+  ExportMembersEmailDto,
+  ExportWorkersEmailDto,
+} from '../dto/export-members-email.dto';
 import {
   MEMBER_EXPORT_SELECT,
   memberCsvHeader,
@@ -114,6 +121,8 @@ export class MemberService {
     private readonly accounts: DiscuvaAccountService,
     private readonly profiles: DiscuvaProfileService,
     private readonly photoRemovals: PhotoRemovalService,
+    private readonly emailQueue: EmailQueueService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -1784,6 +1793,80 @@ export class MemberService {
     }
 
     return qb;
+  }
+
+  async emailExport(
+    dto: ExportMembersEmailDto | ExportWorkersEmailDto,
+    admin: Admin,
+    workers = false,
+  ): Promise<void> {
+    const recipient = dto.recipientEmail ?? admin.member?.email;
+    if (!recipient) {
+      throw new BadRequestException(
+        'No recipient email available — provide recipientEmail explicitly.',
+      );
+    }
+    const filters = { ...dto };
+    delete filters.recipientEmail;
+    const csv = await this.exportCsv({
+      ...filters,
+      workers,
+      status: workers ? undefined : (dto as ExportMembersEmailDto).status,
+      workerStatus: workers ? (dto as ExportWorkersEmailDto).status : undefined,
+    });
+    const name = workers ? 'workers' : 'members';
+    const title = workers ? 'Workers' : 'Members';
+    const filterSummary = [
+      dto.search ? `Search: ${dto.search}` : null,
+      dto.status
+        ? `Status: ${dto.status.toLowerCase().replace(/_/g, ' ')}`
+        : null,
+      workers && (dto as ExportWorkersEmailDto).departmentId
+        ? 'Selected department'
+        : null,
+      workers && (dto as ExportWorkersEmailDto).isTrainee !== undefined
+        ? (dto as ExportWorkersEmailDto).isTrainee
+          ? 'Trainees only'
+          : 'Non-trainees only'
+        : null,
+      !workers && (dto as ExportMembersEmailDto).role
+        ? `Role: ${(dto as ExportMembersEmailDto).role.toLowerCase()}`
+        : null,
+      !workers && (dto as ExportMembersEmailDto).wantsToServe
+        ? 'Interested in serving'
+        : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const jobId = await this.emailQueue.queueEmailWithTemplateAndAttachments(
+      recipient,
+      `Your ${title} CSV Export`,
+      'report-export',
+      {
+        reportTitle: `${title} (CSV)`,
+        generatedAt: new Date().toLocaleString('en-GB', {
+          timeZone: await this.churchTimezone.get(),
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        filterSummary: filterSummary || null,
+      },
+      [
+        {
+          filename: `${name}-${new Date().toISOString().slice(0, 10)}.csv`,
+          content: Buffer.from(csv, 'utf8'),
+        },
+      ],
+    );
+    if (!jobId)
+      throw new BadRequestException(
+        'The export email could not be queued. Please check your email settings and allowance.',
+      );
+    this.auditLogService.log('REPORT_EXPORTED', {
+      actorId: admin.id,
+      targetEmail: recipient,
+      metadata: { report: name, format: 'csv', filters },
+    });
   }
 
   async exportCsv(filters: {
