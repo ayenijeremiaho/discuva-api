@@ -1,3 +1,4 @@
+import { UpdateExportSettingsDto } from './update-export-settings.dto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import {
@@ -6,6 +7,24 @@ import {
 } from './export-members-email.dto';
 
 describe('email export validation', () => {
+  it('requires a valid explicit field array when saving defaults', async () => {
+    for (const fields of [
+      undefined,
+      null,
+      ['password'],
+      ['address', 'address'],
+    ]) {
+      expect(
+        (
+          await validate(plainToInstance(UpdateExportSettingsDto, { fields }))
+        ).map((e) => e.property),
+      ).toContain('fields');
+    }
+    expect(
+      await validate(plainToInstance(UpdateExportSettingsDto, { fields: [] })),
+    ).toHaveLength(0);
+  });
+
   it('accepts supported optional fields and rejects unknown, duplicate and non-array fields', async () => {
     for (const fields of [[], ['emergencyContactName', 'profession']]) {
       expect(

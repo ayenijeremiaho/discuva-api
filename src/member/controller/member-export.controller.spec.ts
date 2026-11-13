@@ -1,3 +1,4 @@
+import { MemberExportSettingsService } from '../service/member-export-settings.service';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { MemberController } from './member.controller';
 import { MemberService } from '../service/member.service';
@@ -12,9 +13,14 @@ import { Admin } from '../../admin/entity/admin.entity';
 
 describe('member email export endpoints', () => {
   const service = { emailExport: jest.fn().mockResolvedValue(undefined) };
+  const settings = {
+    get: jest.fn().mockResolvedValue({ fields: [] }),
+    save: jest.fn().mockResolvedValue({ fields: [] }),
+  };
   const controller = new MemberController(
     service as unknown as MemberService,
     {} as MemberTimelineService,
+    settings as unknown as MemberExportSettingsService,
   );
   beforeEach(() => jest.clearAllMocks());
 
@@ -56,6 +62,29 @@ describe('member email export endpoints', () => {
       controller.getExportFields().find((f) => f.key === 'department')
         ?.required,
     ).toBe(false);
+  });
+
+  it('requires member-write permission to save shared defaults', async () => {
+    expect(
+      Reflect.getMetadata(
+        REQUIRES_PERMISSION_KEY,
+        controller.saveExportSettings,
+      ),
+    ).toBe(AdminPermission.MEMBERS_WRITE);
+    expect(
+      Reflect.getMetadata(
+        REQUIRES_PERMISSION_KEY,
+        controller.getExportSettings,
+      ),
+    ).toBe(AdminPermission.MEMBERS_READ);
+    await controller.saveExportSettings(
+      { fields: ['profession'] },
+      { id: 'admin-1' } as Admin,
+      'true',
+    );
+    expect(settings.save).toHaveBeenCalledWith(['profession'], true, 'admin-1');
+    await controller.getExportSettings();
+    expect(settings.get).toHaveBeenCalledWith(false);
   });
 
   it('passes the member filters and authenticated admin', async () => {

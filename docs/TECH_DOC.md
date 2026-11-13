@@ -23706,8 +23706,8 @@ BOM, CRLF records and quoted/escaped cells.
 `GET /v1/members/export-fields?workers=true|false` (MEMBERS_READ) returns the
 export field catalogue as `{ key, label, required }[]` in the standard envelope.
 It reads static metadata, with no database queries. Both email endpoints accept
-optional `fields: string[]` (at most 32 unique supported field keys). An omitted
-or empty array exports only core columns. Unsupported keys and duplicates are
+optional `fields: string[]` (at most 32 unique supported field keys). An empty array exports only core columns. Omitting the array uses the saved
+organisation defaults for that export type (core-only until configured). Unsupported keys and duplicates are
 rejected. Column order follows the catalogue regardless of selection order.
 Core columns are member ID, first/last name, email, phone, role and member status;
 workers always also include primary department and worker status. All other
@@ -23716,6 +23716,28 @@ catalogue on opening the shared email dialog and offers individual checkboxes,
 Select all and Clear optional fields. Required fields are displayed as text and
 cannot be removed. The export query selects only required/chosen values and
 relation IDs needed for hydration; row filters and 500-row batches are unchanged.
+
+Shared organisation defaults: `GET /v1/members/export-settings?workers=true|false`
+requires MEMBERS_READ and returns `{ fields: string[] }`. `PATCH` on the same
+route requires MEMBERS_WRITE and a JSON `{ fields: string[] }` body. The array is
+required, unique and restricted to supported export field keys. Core fields are
+removed from stored selections because they are always included. Saves are
+atomic upserts into existing tenant `church_settings`, with separate unique
+keys `member-export:members` and `member-export:workers`. Empty selections save a
+core-only default. Changes are audited as CHURCH_SETTING_UPDATED. No migration
+is needed; the existing unique key index supports reads/upserts.
+
+The dialog reloads shared defaults on each open. Save as default is available to
+admins with member-edit permission; it updates this export type for all admins
+and devices. One-off changes and sending an export never overwrite defaults.
+Use saved defaults restores the last loaded/saved selection. Member and worker
+configurations are independent; workers still always include primary department
+and worker status. Saved settings cache for 300 seconds, scoped to the tenant by
+CacheService, and the matching cache key is invalidated on save. One indexed
+settings read on cache miss and one upsert per explicit save; no polling or new
+scheduled jobs. Opening the dialog adds one settings API request. Email export
+reads saved defaults only when the caller omits `fields`; explicit selections
+continue to require no settings lookup.
 
 Emergency contact name, phone and relationship are edited in the member app's
 Edit Profile screen (`PATCH /v1/members/me`), and displayed in My Account and the
