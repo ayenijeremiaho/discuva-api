@@ -1,3 +1,4 @@
+import { MemberExportSettingsService } from './member-export-settings.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -123,6 +124,7 @@ export class MemberService {
     private readonly photoRemovals: PhotoRemovalService,
     private readonly emailQueue: EmailQueueService,
     private readonly churchTimezone: ChurchTimezoneService,
+    private readonly exportSettings: MemberExportSettingsService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -1808,6 +1810,8 @@ export class MemberService {
     }
     const filters = { ...dto };
     delete filters.recipientEmail;
+    filters.fields =
+      dto.fields ?? (await this.exportSettings.get(workers)).fields;
     const csv = await this.exportCsv({
       ...filters,
       workers,

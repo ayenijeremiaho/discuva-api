@@ -1,3 +1,4 @@
+import { MemberExportSettingsService } from './member-export-settings.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -79,6 +80,7 @@ const mockUtilityService = {
   resolveChurchName: jest.fn(),
 };
 
+const mockExportSettings = { get: jest.fn().mockResolvedValue({ fields: [] }) };
 const mockEmailQueue = {
   queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
 };
@@ -125,6 +127,7 @@ describe('MemberService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockExportSettings.get.mockResolvedValue({ fields: [] });
     mockUtilityService.resolveChurchName.mockResolvedValue('Test Church');
 
     const module: TestingModule = await Test.createTestingModule({
@@ -137,6 +140,10 @@ describe('MemberService', () => {
           },
         },
         MemberService,
+        {
+          provide: MemberExportSettingsService,
+          useValue: mockExportSettings,
+        },
         { provide: EmailQueueService, useValue: mockEmailQueue },
         {
           provide: ChurchTimezoneService,
@@ -1792,6 +1799,21 @@ describe('MemberService', () => {
           targetEmail: admin.member.email,
         }),
       );
+    });
+
+    it('uses saved defaults when fields are omitted and preserves explicit one-off choices', async () => {
+      mockExportSettings.get.mockResolvedValue({ fields: ['profession'] });
+      await service.emailExport({}, admin, true);
+      expect(service.exportCsv).toHaveBeenCalledWith(
+        expect.objectContaining({ fields: ['profession'], workers: true }),
+      );
+      expect(mockExportSettings.get).toHaveBeenCalledWith(true);
+      mockExportSettings.get.mockClear();
+      await service.emailExport({ fields: [] }, admin, true);
+      expect(service.exportCsv).toHaveBeenLastCalledWith(
+        expect.objectContaining({ fields: [] }),
+      );
+      expect(mockExportSettings.get).not.toHaveBeenCalled();
     });
 
     it('uses the chosen recipient and worker filters', async () => {

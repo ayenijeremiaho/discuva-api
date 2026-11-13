@@ -1,3 +1,5 @@
+import { MemberExportSettingsService } from '../service/member-export-settings.service';
+import { UpdateExportSettingsDto } from '../dto/update-export-settings.dto';
 import { memberExportFields } from '../utility/member-csv';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -62,6 +64,7 @@ export class MemberController {
   constructor(
     private readonly memberService: MemberService,
     private readonly memberTimelineService: MemberTimelineService,
+    private readonly exportSettings: MemberExportSettingsService,
   ) {}
 
   @UseGuards(AdminGuard)
@@ -129,6 +132,24 @@ export class MemberController {
   @Get('export-fields')
   getExportFields(@Query('workers') workers?: string) {
     return memberExportFields(workers === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get('export-settings')
+  getExportSettings(@Query('workers') workers?: string) {
+    return this.exportSettings.get(workers === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Patch('export-settings')
+  saveExportSettings(
+    @Body() dto: UpdateExportSettingsDto,
+    @CurrentAdmin() admin: Admin,
+    @Query('workers') workers?: string,
+  ) {
+    return this.exportSettings.save(dto.fields, workers === 'true', admin.id);
   }
 
   @UseGuards(AdminGuard, PlanGuard)
