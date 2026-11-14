@@ -13,5 +13,6 @@ export interface AppClsStore extends ClsStore {
   afterRollback?: Array<() => unknown>;
   // Per-request copy of Discuva account reads (see DiscuvaAccountService).
   adminAccessMode?: Promise<boolean>;
+  formAccessMode?: Promise<boolean>;
   discuvaAccountMemo?: Map<string, Promise<unknown>>;
 }

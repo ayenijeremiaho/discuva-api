@@ -13430,7 +13430,7 @@
                 }
               ]
             },
-            "description": "Explicit form assignments only. Active admin, feature on; existing module/plan guards."
+            "description": "Explicit form assignments only. Active admin, Assigned Forms (form_access_mode) on, independent of individual permissions; existing module/plan guards."
           },
           "response": []
         },

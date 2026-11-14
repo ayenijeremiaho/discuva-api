@@ -189,6 +189,8 @@ export type AuditAction =
   // Admin users
   | 'ADMIN_USER_CREATED'
   | 'ADMIN_USER_UPDATED'
+  | 'FORM_ACCESS_GRANTED'
+  | 'FORM_ACCESS_REVOKED'
   | 'ADMIN_USER_DEACTIVATED'
   // Tithe accounts
   | 'TITHE_ACCOUNT_CREATED'

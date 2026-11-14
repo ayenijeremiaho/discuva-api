@@ -34,7 +34,7 @@ function setup() {
     }),
   };
   const access = {
-    assertEnabled: jest.fn().mockResolvedValue(undefined),
+    assertFormAccessEnabled: jest.fn().mockResolvedValue(undefined),
     has: jest.fn().mockResolvedValue(false),
   };
   const owners = { assertCanChange: jest.fn().mockResolvedValue(undefined) };
@@ -89,7 +89,7 @@ describe('FormAccessService', () => {
     await expect(
       service.assertResultAccess({ ...actor, isActive: false }, 'form-a'),
     ).rejects.toThrow();
-    access.assertEnabled.mockRejectedValue(new Error('disabled'));
+    access.assertFormAccessEnabled.mockRejectedValue(new Error('disabled'));
     await expect(service.assertResultAccess(actor, 'form-a')).rejects.toThrow(
       'disabled',
     );
@@ -162,7 +162,7 @@ describe('FormAccessService', () => {
       ['formId', 'adminId'],
     );
     expect(audit.log).toHaveBeenCalledWith(
-      'ADMIN_USER_UPDATED',
+      'FORM_ACCESS_GRANTED',
       expect.objectContaining({
         metadata: expect.objectContaining({ formAccessFrom: null }),
       }),

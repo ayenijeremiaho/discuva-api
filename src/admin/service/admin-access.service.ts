@@ -15,20 +15,31 @@ export class AdminAccessService {
     private readonly cls: ClsService<AppClsStore>,
   ) {}
 
+  // Individual permissions: extra global permissions for one admin on top of their role.
   isOn(): Promise<boolean> {
-    if (!this.cls.isActive()) return this.readMode();
-    let pending = this.cls.get('adminAccessMode');
+    return this.memo('adminAccessMode', PlatformSettingKey.ADMIN_ACCESS_MODE);
+  }
+
+  // Assigned forms: one form's results shared with one admin. Its own switch, independent of individual permissions.
+  isFormAccessOn(): Promise<boolean> {
+    return this.memo('formAccessMode', PlatformSettingKey.FORM_ACCESS_MODE);
+  }
+
+  private memo(
+    slot: 'adminAccessMode' | 'formAccessMode',
+    key: PlatformSettingKey,
+  ): Promise<boolean> {
+    if (!this.cls.isActive()) return this.readMode(key);
+    let pending = this.cls.get(slot);
     if (!pending) {
-      pending = this.readMode();
-      this.cls.set('adminAccessMode', pending);
+      pending = this.readMode(key);
+      this.cls.set(slot, pending);
     }
     return pending;
   }
 
-  private async readMode(): Promise<boolean> {
-    const mode = await this.settings.getNumber(
-      PlatformSettingKey.ADMIN_ACCESS_MODE,
-    );
+  private async readMode(key: PlatformSettingKey): Promise<boolean> {
+    const mode = await this.settings.getNumber(key);
     if (mode === 2) return true;
     if (mode !== 1) return false;
     const tenantId = this.cls.get('tenantId');
@@ -73,7 +84,12 @@ export class AdminAccessService {
 
   async assertEnabled(): Promise<void> {
     if (!(await this.isOn()))
-      throw new ForbiddenException('Individual access is not enabled.');
+      throw new ForbiddenException('Individual permissions are not enabled.');
+  }
+
+  async assertFormAccessEnabled(): Promise<void> {
+    if (!(await this.isFormAccessOn()))
+      throw new ForbiddenException('Assigned forms are not enabled.');
   }
 
   async assertCanDelegate(
@@ -98,6 +114,7 @@ export class AdminAccessService {
   async describe(admin: Admin): Promise<Admin> {
     admin.effectivePermissions = await this.permissions(admin);
     admin.accessGrantsEnabled = await this.isOn();
+    admin.formAccessEnabled = await this.isFormAccessOn();
     return admin;
   }
 }

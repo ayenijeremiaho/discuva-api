@@ -37,7 +37,7 @@ export class FormAccessService {
   ): Promise<boolean> {
     if (!admin?.isActive) throw new ForbiddenException('Form access required.');
     if (await this.access.has(admin, AdminPermission.FORMS_READ)) return true;
-    await this.access.assertEnabled();
+    await this.access.assertFormAccessEnabled();
     const grant = await this.grants.findOne({
       where: {
         formId,
@@ -52,7 +52,7 @@ export class FormAccessService {
   }
 
   private async assertManager(actor: Admin): Promise<void> {
-    await this.access.assertEnabled();
+    await this.access.assertFormAccessEnabled();
     if (
       !(await this.access.has(actor, AdminPermission.ADMIN_WRITE)) ||
       !(await this.access.has(actor, AdminPermission.FORMS_READ))
@@ -99,7 +99,7 @@ export class FormAccessService {
       { formId, adminId, canView: true, canExport: dto.canExport },
       ['formId', 'adminId'],
     );
-    this.audit.log('ADMIN_USER_UPDATED', {
+    this.audit.log('FORM_ACCESS_GRANTED', {
       actorId: actor.member.id,
       targetId: adminId,
       metadata: {
@@ -117,7 +117,7 @@ export class FormAccessService {
     await this.subject(actor, adminId);
     await this.assertForm(formId);
     await this.grants.delete({ formId, adminId });
-    this.audit.log('ADMIN_USER_UPDATED', {
+    this.audit.log('FORM_ACCESS_REVOKED', {
       actorId: actor.member.id,
       targetId: adminId,
       metadata: { formId, formAccessTo: null },
@@ -249,7 +249,7 @@ export class FormAccessService {
   }
 
   async shared(admin: Admin, query: FormAccessQueryDto) {
-    await this.access.assertEnabled();
+    await this.access.assertFormAccessEnabled();
     return this.listAssigned(admin.id, query);
   }
 
