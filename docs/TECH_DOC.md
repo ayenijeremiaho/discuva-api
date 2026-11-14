@@ -23783,3 +23783,33 @@ two-column action grid, with a wrapping toolbar from the small breakpoint upward
 The CSV dialog and all filtering/export behavior are unchanged. No API routes,
 database queries, indexes, migrations or recurring work are added. This fix is
 based on production master, independently of unreleased Stage 4 changes.
+
+## Individual admin permissions and form results access (2026-11-14)
+
+Implemented on `feat/admin-user-form-access`, separate from Phase 4. Default off. The platform setting `admin_access_mode` is 0/off, 1/test organisations, 2/all. Test mode uses comma-separated **tenant UUIDs** in `ADMIN_ACCESS_TEST_TENANTS`, independent of sign-in settings. Settings retain the existing cached platform-setting read; the mode decision is memoised only within each request. No polling or scheduled work is added.
+
+`AdminAccessService` resolves deduplicated role permissions plus `admins.additional_permissions` when enabled. The existing indexed admin/member + role read selects the extra array; no extra permission-row query or GIN index. Role-authorised checks return immediately without a rollout-setting read. Inactive accounts are denied. Guard, service-level checks, recovery authority and notification recipient selection use the same additive semantics, including batch SQL recipient checks. Roles and explicit grants retain separate provenance. Existing owner, self-edit and last-owner protections remain. Non-owner access managers cannot assign permissions beyond their own authority, including through shared role edits; only owners may change a role assigned to an owner. Recovery of an admin with scoped form grants additionally requires global form read, preventing account recovery from bypassing resource access.
+
+Tenant migrations `1805961600000-AddAdminAccessGrants` and `1806048000000-IndexFormResultsOrdering` add the empty-default array, `form_admin_access`, and response ordering indexes. Grant FKs cascade on admin/form deletion; UNIQUE `(form_id, admin_id)` and reverse `(admin_id, form_id)` cover both management directions and scoped checks. CHECK disallows export without view. Response indexes match `(form_id, created_at DESC, id DESC)` and `(form_id, score DESC NULLS LAST, created_at DESC, id DESC)`. Response pagination is capped at 100 with deterministic ordering and selects only member ID/name, rather than a full member profile. Existing global `FORMS_READ` retains all-form read/analytics/export access.
+
+All routes below use ADMIN-surface authentication, tenant context and existing Forms module/plan guards. Access managers need effective `ADMIN_WRITE` plus global `FORMS_READ`. They cannot change their own form grants or another owner without owner authority. Writes use the existing tenant request transaction and audit `ADMIN_USER_UPDATED` with form IDs and grant changes.
+
+| Endpoint | Behavior |
+| --- | --- |
+| POST `/admin/users`, PATCH `/admin/users/:id` | Optional unique validated `additionalPermissions` enum array; editing requires feature on |
+| GET `/admin/users`, `/admin/users/:id`, `/admin/users/me` | Separate role, additional, `effectivePermissions`, `accessGrantsEnabled`; profile additionally includes indexed `hasAssignedForms` EXISTS |
+| GET `/forms/shared` | Explicit assignments only, paginated with filtered totals/search; never grants global read |
+| GET `/forms/:id/results-context` | Global read or scoped view; minimal form ID/title/purpose and field ID/label/type/order; `canExport`; no builder configuration/answer keys |
+| GET `/forms/:id/submissions`, `/forms/:id/analytics` | Global read or target view grant |
+| GET `/forms/:id/submissions/export` | Global read or target view+export grant |
+| GET `/forms/:id/access` | Paginated form-side grant list, minimal recipient identity |
+| GET `/forms/access/admin/:adminId` | Paginated user-side assignments, minimal form identity |
+| GET `/forms/access/admin-options`, `/forms/access/form-options` | Searchable/paginated minimal pickers for managers |
+| PUT `/forms/:id/access/:adminId` | Upsert `{canView:true, canExport:boolean}`; export deliberately opt-in |
+| DELETE `/forms/:id/access/:adminId` | Revoke individual assignment; broader role/direct permissions still apply |
+
+Assignment/picker queries accept page >=1, limit 1–100 (default 20), search <=200 characters. Search escapes wildcard characters. Lists filter and count in SQL; no per-row access queries or unbounded ID arrays. Scoped requests add one indexed grant existence check; unrelated global checks do not query grants. Profile adds at most one EXISTS when enabled. There is no cross-request permission cache, so the next request observes grant removal. Existing analytics and whole-form CSV continue their existing on-demand submission reads; these are not live spreadsheet subscriptions.
+
+The portal uses existing theme variables, header actions, permission picker, pagination, errors and confirmation dialog. Admin Users separates role-derived access from Individual permissions. Both Assigned forms in the admin panel and Manage results access under a form's submissions use the same grant API. Results-only users have Assigned forms navigation and a suitable sign-in landing page without fabricated global permissions. The results context controls export visibility; server checks remain authoritative. Release notes use the `admin_access` switch tag; no member-app release note because this is admin-only.
+
+Rollout: API migrations/code first, then admin UI, default off. Test only an approved organisation before broader activation. Rollback switches mode off and keeps schema, grant data and audits; it does not rewrite roles. No merge, push or deployment is implied by implementation. See [implementation plan](ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md) and [validation record](ADMIN_USER_FORM_ACCESS_VALIDATION.md).

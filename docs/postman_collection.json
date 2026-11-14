@@ -3129,7 +3129,7 @@
                     "users"
                   ]
                 },
-                "description": "Grants admin portal access to an existing member. Requires ADMIN_WRITE permission. Sends a welcome-admin email to the member with their email address and the portal login URL."
+                "description": "Grants admin portal access to an existing member. Requires ADMIN_WRITE permission. Sends a welcome-admin email to the member with their email address and the portal login URL.\nOptional additionalPermissions: unique AdminPermission enum array (default empty), feature must be enabled. Effective access is role + individual permissions. Non-owner managers may delegate only within their authority."
               },
               "response": [
                 {
@@ -3192,7 +3192,8 @@
                       "value": "{{adminUserId}}"
                     }
                   ]
-                }
+                },
+                "description": "\nOptional additionalPermissions: unique AdminPermission enum array (default empty), feature must be enabled. Effective access is role + individual permissions. Non-owner managers may delegate only within their authority."
               },
               "response": [
                 {
@@ -13209,7 +13210,8 @@
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": ""
           },
           "response": [
             {
@@ -13326,7 +13328,8 @@
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": ""
           },
           "response": [
             {
@@ -13387,6 +13390,332 @@
               "body": "{ \"statusCode\": 400, \"message\": \"This field does not accept file uploads\" }"
             }
           ]
+        },
+        {
+          "name": "Assigned Forms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/shared?page=1&limit=20&search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "shared"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Explicit form assignments only. Active admin, feature on; existing module/plan guards."
+          },
+          "response": []
+        },
+        {
+          "name": "Form Results Context",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/results-context",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "results-context"
+              ]
+            },
+            "description": "Global forms:read OR scoped view grant. Safe field labels/types only; includes canExport."
+          },
+          "response": []
+        },
+        {
+          "name": "List Form Results Access",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/access?page=1&limit=20&search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "access"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Requires enabled individual access, admin:write and global forms:read."
+          },
+          "response": []
+        },
+        {
+          "name": "List Admin Form Assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/access/admin/{{adminUserId}}?page=1&limit=20&search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "access",
+                "admin",
+                "{{adminUserId}}"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access manager; paginated assignments for one tenant-local admin."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Admins for Form Access",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/access/admin-options?page=1&limit=20&search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "access",
+                "admin-options"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access manager; minimal active admin identity and globalAccess indication."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Forms for Assignment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/access/form-options?page=1&limit=20&search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "access",
+                "form-options"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access manager; minimal form identity, paginated/searchable."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Form Results Access",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/access/{{adminUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "access",
+                "{{adminUserId}}"
+              ]
+            },
+            "description": "Access manager; cannot self-edit or change owners without owner authority. Export opt-in; view required.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"canView\": true,\n  \"canExport\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Form Results Access",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/access/{{adminUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "access",
+                "{{adminUserId}}"
+              ]
+            },
+            "description": "Removes individual grant. Does not narrow existing role/direct global access."
+          },
+          "response": []
         }
       ]
     },

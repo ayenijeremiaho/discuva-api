@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +30,7 @@ export class OverdueCheckoutScheduler {
   private static readonly LOCK_KEY = 'lock:asset-overdue-checkouts';
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(AssetCheckout)
     private readonly checkoutRepo: Repository<AssetCheckout>,
     @InjectRepository(AssetCheckoutNotification)
@@ -120,12 +122,12 @@ export class OverdueCheckoutScheduler {
       .where('a.isActive = true')
       .getMany();
 
-    return admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(
-          AdminPermission.ASSET_MANAGEMENT_READ,
-        ),
+    return (
+      await this.adminAccess.filter(
+        admins,
+        AdminPermission.ASSET_MANAGEMENT_READ,
       )
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
   }

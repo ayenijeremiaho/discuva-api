@@ -1,15 +1,29 @@
 import {
   ArrayMaxSize,
+  ArrayUnique,
+  IsEnum,
   IsArray,
   IsBoolean,
   IsNotEmpty,
   IsOptional,
   IsUUID,
+  ValidateIf,
   Matches,
   MaxLength,
 } from 'class-validator';
 
-export class GrantAdminDto {
+import { AdminPermission } from '../enum/admin-permission.enum';
+
+class AdditionalPermissionsDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(Object.values(AdminPermission).length)
+  @IsEnum(AdminPermission, { each: true })
+  additionalPermissions?: AdminPermission[];
+}
+
+export class GrantAdminDto extends AdditionalPermissionsDto {
   @IsUUID()
   @IsNotEmpty()
   memberId: string;
@@ -19,7 +33,7 @@ export class GrantAdminDto {
   adminRoleId: string;
 }
 
-export class UpdateAdminUserDto {
+export class UpdateAdminUserDto extends AdditionalPermissionsDto {
   @IsUUID()
   @IsOptional()
   adminRoleId?: string;

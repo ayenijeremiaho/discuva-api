@@ -1,29 +1,28 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { UpdateFavouritePagesDto } from './admin-user.dto';
+import { UpdateAdminUserDto } from './admin-user.dto';
+import { AdminPermission } from '../enum/admin-permission.enum';
 
-async function errorsFor(pages: unknown) {
-  return validate(plainToInstance(UpdateFavouritePagesDto, { pages }));
-}
-
-describe('UpdateFavouritePagesDto', () => {
-  it('accepts admin-portal paths', async () => {
-    expect(
-      await errorsFor(['/members', '/finances/external-payees', '/sms-logs']),
-    ).toHaveLength(0);
-  });
-
-  it('accepts an empty list to clear favourites', async () => {
-    expect(await errorsFor([])).toHaveLength(0);
-  });
-
+describe('individual permission validation', () => {
   it.each([
-    ['an external URL', ['https://evil.example']],
-    ['a path without a leading slash', ['members']],
-    ['a query string', ['/members?x=1']],
-    ['too many pages', Array.from({ length: 13 }, (_, i) => `/p${i}`)],
-    ['a non-array', '/members'],
-  ])('rejects %s', async (_label, pages) => {
-    expect(await errorsFor(pages)).not.toHaveLength(0);
+    { value: null },
+    { value: ['unknown:permission'] },
+    { value: [AdminPermission.FORMS_READ, AdminPermission.FORMS_READ] },
+    { value: 'forms:read' },
+  ])('rejects malformed permission grants: $value', async ({ value }) => {
+    const errors = await validate(
+      plainToInstance(UpdateAdminUserDto, { additionalPermissions: value }),
+    );
+    expect(
+      errors.some((error) => error.property === 'additionalPermissions'),
+    ).toBe(true);
+  });
+  it('accepts omission and an explicit empty set for removing direct grants', async () => {
+    expect(await validate(plainToInstance(UpdateAdminUserDto, {}))).toEqual([]);
+    expect(
+      await validate(
+        plainToInstance(UpdateAdminUserDto, { additionalPermissions: [] }),
+      ),
+    ).toEqual([]);
   });
 });

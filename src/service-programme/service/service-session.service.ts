@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -266,6 +267,7 @@ const LIVE_ACTION_VIA: Record<ServiceActionRoleEnum, string> = {
 @Injectable()
 export class ServiceSessionService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly cacheService: CacheService,
     private readonly programmeSvc: ServiceProgrammeService,
@@ -2388,9 +2390,10 @@ export class ServiceSessionService {
       where: { member: { id: memberId }, isActive: true },
       relations: ['adminRole'],
     });
-    return !!admin?.adminRole.permissions.includes(
+    return !!(await this.adminAccess.has(
+      admin,
       AdminPermission.SERVICE_PROGRAMME_WRITE,
-    );
+    ));
   }
 
   private async assertCanControlSession(memberId: string): Promise<void> {

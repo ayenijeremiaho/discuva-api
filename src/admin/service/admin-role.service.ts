@@ -1,12 +1,16 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AdminPermission } from '../enum/admin-permission.enum';
+import { AdminAccessService } from './admin-access.service';
+import { Admin } from '../entity/admin.entity';
 import { AdminRole } from '../entity/admin-role.entity';
 import { CreateAdminRoleDto, UpdateAdminRoleDto } from '../dto/admin-role.dto';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -19,9 +23,12 @@ export class AdminRoleService {
     @InjectRepository(AdminRole)
     private readonly adminRoleRepository: Repository<AdminRole>,
     private readonly auditLogService: AuditLogService,
+    private readonly access: AdminAccessService,
+    @InjectRepository(Admin) private readonly admins: Repository<Admin>,
   ) {}
 
   async create(dto: CreateAdminRoleDto, actorId: string): Promise<AdminRole> {
+    await this.assertDelegation(actorId, dto.permissions);
     const exists = await this.adminRoleRepository.existsBy({ name: dto.name });
     if (exists)
       throw new ConflictException(`Admin role "${dto.name}" already exists.`);
@@ -50,6 +57,11 @@ export class AdminRoleService {
     actorId: string,
   ): Promise<AdminRole> {
     const role = await this.getById(id);
+    await this.assertDelegation(
+      actorId,
+      dto.permissions ?? role.permissions,
+      id,
+    );
 
     if (dto.name && dto.name !== role.name) {
       const exists = await this.adminRoleRepository.existsBy({
@@ -103,6 +115,28 @@ export class AdminRoleService {
       targetName: name,
       metadata: { name },
     });
+  }
+
+  private async assertDelegation(
+    actorId: string,
+    permissions: AdminPermission[],
+    roleId?: string,
+  ): Promise<void> {
+    if (!(await this.access.isOn())) return;
+    const actor = await this.admins.findOne({
+      where: { member: { id: actorId }, isActive: true },
+      relations: ['adminRole'],
+    });
+    await this.access.assertCanDelegate(actor, permissions);
+    if (
+      roleId &&
+      !actor.isOwner &&
+      (await this.admins.existsBy({ adminRole: { id: roleId }, isOwner: true }))
+    ) {
+      throw new ForbiddenException(
+        'Only an account owner can change a role assigned to an owner.',
+      );
+    }
   }
 
   async getAll(): Promise<AdminRole[]> {

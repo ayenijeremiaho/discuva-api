@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -62,6 +63,7 @@ const person = (id: string | null, name: string | null) =>
 @Injectable()
 export class CommunityService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(PostReport)
     private readonly reportRepo: Repository<PostReport>,
     @InjectRepository(CommunityCategory)
@@ -262,7 +264,7 @@ export class CommunityService {
          SELECT member_id, 'NAMED' AS src FROM community_moderators
          UNION ALL
          SELECT a.member_id, 'ADMIN' FROM admins a JOIN admin_roles r ON r.id = a.admin_role_id
-         WHERE a.is_active AND 'community:moderate' = ANY(r.permissions)
+         WHERE a.is_active AND ('community:moderate' = ANY(r.permissions) ${(await this.adminAccess.isOn()) ? "OR 'community:moderate' = ANY(a.additional_permissions)" : ''})
        ) x
        JOIN members m ON m.id = x.member_id
        GROUP BY m.id

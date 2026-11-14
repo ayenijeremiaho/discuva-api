@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,8 +23,7 @@ interface ExpiryConfig {
   expiryField: 'insuranceExpiry' | 'roadworthinessExpiry';
   label: string;
   notifiedField:
-    | 'insuranceNotifiedThresholds'
-    | 'roadworthinessNotifiedThresholds';
+    'insuranceNotifiedThresholds' | 'roadworthinessNotifiedThresholds';
 }
 
 const EXPIRY_CONFIGS: ExpiryConfig[] = [
@@ -45,6 +45,7 @@ export class VehicleExpiryAlertScheduler {
   private static readonly LOCK_KEY = 'lock:asset-vehicle-expiry-alerts';
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(Asset)
     private readonly assetRepo: Repository<Asset>,
     @InjectRepository(Admin)
@@ -184,12 +185,12 @@ export class VehicleExpiryAlertScheduler {
       .where('a.isActive = true')
       .getMany();
 
-    return admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(
-          AdminPermission.ASSET_MAINTENANCE_ALERT,
-        ),
+    return (
+      await this.adminAccess.filter(
+        admins,
+        AdminPermission.ASSET_MAINTENANCE_ALERT,
       )
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
   }

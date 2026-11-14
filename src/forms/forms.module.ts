@@ -1,3 +1,6 @@
+import { FormAccessService } from './service/form-access.service';
+import { FormAdminAccess } from '../admin/entity/form-admin-access.entity';
+import { Admin } from '../admin/entity/admin.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
@@ -25,6 +28,8 @@ import { BuilderTemplateModule } from '../builder-template/builder-template.modu
   imports: [
     TenantTypeOrmModule.forFeature([
       Form,
+      FormAdminAccess,
+      Admin,
       FormField,
       FormSubmission,
       FormFieldAttachment,
@@ -42,6 +47,7 @@ import { BuilderTemplateModule } from '../builder-template/builder-template.modu
   ],
   providers: [
     FormService,
+    FormAccessService,
     FormSubmissionService,
     FormAttemptService,
     FormAttachmentCleanupScheduler,

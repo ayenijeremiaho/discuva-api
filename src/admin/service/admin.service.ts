@@ -8,6 +8,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Admin } from '../entity/admin.entity';
+import { AdminPermission } from '../enum/admin-permission.enum';
+import { AdminAccessService } from './admin-access.service';
+import { FormAdminAccess } from '../entity/form-admin-access.entity';
 import { AdminRoleService } from './admin-role.service';
 import { AdminTwoFactorService } from './admin-two-factor.service';
 import { AdminOwnerService } from './admin-owner.service';
@@ -30,14 +33,27 @@ export class AdminService {
     private readonly utilityService: UtilityService,
     private readonly twoFactor: AdminTwoFactorService,
     private readonly owners: AdminOwnerService,
+    private readonly access: AdminAccessService,
+    @InjectRepository(FormAdminAccess)
+    private readonly formAccessRepository: Repository<FormAdminAccess>,
   ) {}
 
   async grant(dto: GrantAdminDto, actorId: string): Promise<Admin> {
+    const role = await this.adminRoleService.getById(dto.adminRoleId);
+    if (dto.additionalPermissions !== undefined)
+      await this.access.assertEnabled();
     const member = await this.memberService.getById(dto.memberId);
 
     const existing = await this.adminRepository.findOne({
       where: { member: { id: member.id } },
     });
+    if (await this.access.isOn()) {
+      const actor = await this.findByMemberId(actorId);
+      await this.access.assertCanDelegate(actor, [
+        ...role.permissions,
+        ...(dto.additionalPermissions ?? existing?.additionalPermissions ?? []),
+      ]);
+    }
     if (existing) {
       if (existing.isActive) {
         this.logger.warn(
@@ -47,8 +63,10 @@ export class AdminService {
           'This member already has an active admin account.',
         );
       }
+      await this.owners.assertCanChange(existing, actorId);
       existing.isActive = true;
-      const role = await this.adminRoleService.getById(dto.adminRoleId);
+      if (dto.additionalPermissions !== undefined)
+        existing.additionalPermissions = dto.additionalPermissions;
       existing.adminRole = role;
       const saved = await this.adminRepository.save(existing);
       this.logger.log(`Admin access reactivated for member ${member.id}`);
@@ -57,17 +75,22 @@ export class AdminService {
         targetId: member.id,
         targetEmail: member.email,
         targetName: `${member.firstname} ${member.lastname}`,
-        metadata: { adminRoleId: dto.adminRoleId, reactivated: true },
+        metadata: {
+          adminRoleId: dto.adminRoleId,
+          reactivated: true,
+          additionalPermissions: existing.additionalPermissions ?? [],
+        },
       });
       this.sendAdminWelcomeEmail(member.email, member.firstname);
-      return saved;
+      return this.access.describe(saved);
     }
 
-    const adminRole = await this.adminRoleService.getById(dto.adminRoleId);
+    const adminRole = role;
     const admin = this.adminRepository.create({
       member,
       adminRole,
       isActive: true,
+      additionalPermissions: dto.additionalPermissions ?? [],
     });
     const saved = await this.adminRepository.save(admin);
     this.logger.log(`Admin access granted to member ${member.id}`);
@@ -76,10 +99,13 @@ export class AdminService {
       targetId: member.id,
       targetEmail: member.email,
       targetName: `${member.firstname} ${member.lastname}`,
-      metadata: { adminRoleId: dto.adminRoleId },
+      metadata: {
+        adminRoleId: dto.adminRoleId,
+        additionalPermissions: dto.additionalPermissions ?? [],
+      },
     });
     this.sendAdminWelcomeEmail(member.email, member.firstname);
-    return saved;
+    return this.access.describe(saved);
   }
 
   async update(
@@ -96,10 +122,27 @@ export class AdminService {
     await this.owners.assertCanChange(admin, actorId);
     if (dto.isActive === false) await this.owners.assertNotLastOwner(admin);
 
+    const previousAdditionalPermissions = [
+      ...(admin.additionalPermissions ?? []),
+    ];
+    if (dto.additionalPermissions !== undefined)
+      await this.access.assertEnabled();
+    const role = dto.adminRoleId
+      ? await this.adminRoleService.getById(dto.adminRoleId)
+      : admin.adminRole;
+    if (await this.access.isOn()) {
+      const actor = await this.findByMemberId(actorId);
+      await this.access.assertCanDelegate(actor, [
+        ...role.permissions,
+        ...(dto.additionalPermissions ?? admin.additionalPermissions ?? []),
+      ]);
+    }
+    if (dto.additionalPermissions !== undefined)
+      admin.additionalPermissions = dto.additionalPermissions;
     const previousRoleName = admin.adminRole?.name;
 
     if (dto.adminRoleId) {
-      admin.adminRole = await this.adminRoleService.getById(dto.adminRoleId);
+      admin.adminRole = role;
     }
     if (dto.isActive !== undefined) admin.isActive = dto.isActive;
 
@@ -114,6 +157,10 @@ export class AdminService {
         : undefined,
       metadata: {
         changes: Object.keys(dto),
+        ...(dto.additionalPermissions !== undefined && {
+          additionalPermissionsFrom: previousAdditionalPermissions,
+          additionalPermissionsTo: dto.additionalPermissions,
+        }),
         ...(dto.adminRoleId && {
           roleFrom: previousRoleName,
           roleTo: admin.adminRole?.name,
@@ -121,7 +168,7 @@ export class AdminService {
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
       },
     });
-    return saved;
+    return this.access.describe(saved);
   }
 
   async resetTwoFactor(id: string, actorId: string): Promise<void> {
@@ -177,7 +224,7 @@ export class AdminService {
         delete (a.member as any).deviceId;
       }
     }
-    return admins;
+    return Promise.all(admins.map((admin) => this.access.describe(admin)));
   }
 
   async updateMyAppearanceMode(
@@ -207,7 +254,7 @@ export class AdminService {
       delete (admin.member as any).password;
       delete (admin.member as any).deviceId;
     }
-    return admin;
+    return this.access.describe(admin);
   }
 
   // Separate from findById — AdminGuard already preloads 'member' on every
@@ -224,6 +271,13 @@ export class AdminService {
       delete (admin.member as any).password;
       delete (admin.member as any).deviceId;
     }
+    await this.access.describe(admin);
+    admin.hasAssignedForms =
+      admin.accessGrantsEnabled &&
+      (await this.formAccessRepository.existsBy({
+        adminId: id,
+        canView: true,
+      }));
     return admin;
   }
 
@@ -234,6 +288,24 @@ export class AdminService {
     const favouritePages = [...new Set(pages)];
     await this.adminRepository.update(id, { favouritePages });
     return { favouritePages };
+  }
+
+  async assertCanRecoverFormAccess(actor: Admin, target: Admin): Promise<void> {
+    if (
+      !(await this.access.isOn()) ||
+      (await this.access.has(actor, AdminPermission.FORMS_READ))
+    )
+      return;
+    if (
+      await this.formAccessRepository.existsBy({
+        adminId: target.id,
+        canView: true,
+      })
+    ) {
+      throw new ForbiddenException(
+        'Recovering an admin with assigned forms requires access to all forms.',
+      );
+    }
   }
 
   async countActive(): Promise<number> {

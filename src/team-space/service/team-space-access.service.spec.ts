@@ -1,3 +1,4 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   TeamSpaceAccessService,
@@ -29,6 +30,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
   const plans = { gateReason: jest.fn().mockResolvedValue(null) };
   const cls = { get: jest.fn().mockReturnValue('t1') };
   const service = new TeamSpaceAccessService(
+    mockAdminAccess as never,
     spaceRepo as never,
     churchSettings as never,
     chatSettings as never,
@@ -234,6 +236,7 @@ describe('TeamSpaceAccessService (community)', () => {
   const plans = { gateReason: jest.fn().mockResolvedValue(null) };
   const cls = { get: jest.fn().mockReturnValue('t1') };
   const service = new TeamSpaceAccessService(
+    mockAdminAccess as never,
     spaceRepo as never,
     churchSettings as never,
     { get: jest.fn() } as never,

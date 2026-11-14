@@ -1,3 +1,6 @@
+import { FormAdminAccess } from '../entity/form-admin-access.entity';
+import { mockAdminAccess } from '../testing/admin-access.mock';
+import { AdminAccessService } from './admin-access.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
@@ -12,6 +15,8 @@ import { AdminPermission } from '../enum/admin-permission.enum';
 import { AppearanceMode } from '../../member/enums/appearance-mode.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
+
+const mockFormAccessRepo = { existsBy: jest.fn().mockResolvedValue(false) };
 
 const mockAdminRepo = {
   update: jest.fn(),
@@ -68,6 +73,11 @@ describe('AdminService', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: getRepositoryToken(FormAdminAccess),
+          useValue: mockFormAccessRepo,
+        },
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         AdminService,
         { provide: getRepositoryToken(Admin), useValue: mockAdminRepo },
         { provide: AdminRoleService, useValue: mockAdminRoleService },
@@ -242,6 +252,29 @@ describe('AdminService', () => {
       mockAdminRepo.countBy.mockResolvedValue(3);
       const count = await service.countActive();
       expect(count).toBe(3);
+    });
+  });
+  describe('recovery of assigned-form admins', () => {
+    it('blocks account recovery that would bypass resource-scoped access', async () => {
+      mockAdminAccess.isOn.mockResolvedValueOnce(true);
+      mockAdminAccess.has.mockResolvedValueOnce(false);
+      mockFormAccessRepo.existsBy.mockResolvedValueOnce(true);
+      await expect(
+        service.assertCanRecoverFormAccess(mockAdmin, {
+          ...mockAdmin,
+          id: 'target',
+        }),
+      ).rejects.toThrow('assigned forms');
+      expect(mockFormAccessRepo.existsBy).toHaveBeenCalledWith({
+        adminId: 'target',
+        canView: true,
+      });
+    });
+    it('does not query form grants for a global form reader', async () => {
+      mockAdminAccess.isOn.mockResolvedValueOnce(true);
+      mockAdminAccess.has.mockResolvedValueOnce(true);
+      await service.assertCanRecoverFormAccess(mockAdmin, mockAdmin);
+      expect(mockFormAccessRepo.existsBy).not.toHaveBeenCalled();
     });
   });
 });

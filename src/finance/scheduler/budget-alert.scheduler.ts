@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,6 +27,7 @@ export class BudgetAlertScheduler {
   private readonly logger = new Logger(BudgetAlertScheduler.name);
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(Budget)
     private readonly budgetRepo: Repository<Budget>,
     @InjectRepository(JournalEntryLine)
@@ -187,10 +189,7 @@ export class BudgetAlertScheduler {
       .where('a.isActive = true')
       .getMany();
 
-    return admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(AdminPermission.FINANCE_READ),
-      )
+    return (await this.adminAccess.filter(admins, AdminPermission.FINANCE_READ))
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
   }

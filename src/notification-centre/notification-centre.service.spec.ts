@@ -1,3 +1,4 @@
+import { mockAdminAccess } from '../admin/testing/admin-access.mock';
 import { NotificationCentreService } from './notification-centre.service';
 import { EmailCategory } from '../utility/email-provider/email-category.enum';
 import { NOTIFICATION_GROUPS } from './notification-centre.constant';
@@ -28,6 +29,7 @@ describe('NotificationCentreService', () => {
   const admin = (...permissions: string[]) =>
     ({ adminRole: { permissions } }) as any;
   const service = new NotificationCentreService(
+    mockAdminAccess as never,
     categories as any,
     usage as any,
     allowance as any,

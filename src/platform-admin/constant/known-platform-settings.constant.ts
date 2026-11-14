@@ -178,6 +178,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 30,
   },
+  [PlatformSettingKey.ADMIN_ACCESS_MODE]: {
+    label: 'Individual Admin and Form Access',
+    unit: '0 = off, 1 = test organisations (ADMIN_ACCESS_TEST_TENANTS), 2 = every organisation',
+    defaultValue: 0,
+    min: 0,
+    max: 2,
+  },
   [PlatformSettingKey.DISCUVA_PROFILE_MODE]: {
     label: 'Global Profile',
     unit: '0 = off, 1 = test churches only (DISCUVA_ACCOUNT_TEST_TENANTS), 2 = every church. Needs One Discuva Sign-in on too',
