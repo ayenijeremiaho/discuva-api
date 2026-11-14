@@ -116,4 +116,12 @@ describe('AdminAccessService', () => {
       expect(described.effectivePermissions).toEqual([P.MEMBERS_READ]);
     });
   });
+
+  it('never grants forms access from an individual addition, even one stored earlier', async () => {
+    const { service } = setup();
+    const user = admin([], [P.FORMS_READ, P.FORMS_WRITE, P.MEMBERS_READ]);
+    expect(await service.permissions(user)).toEqual([P.MEMBERS_READ]);
+    expect(await service.has(user, P.FORMS_READ)).toBe(false);
+    expect(await service.filter([user], P.FORMS_WRITE)).toEqual([]);
+  });
 });

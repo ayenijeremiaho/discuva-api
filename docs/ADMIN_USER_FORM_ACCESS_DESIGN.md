@@ -5,7 +5,7 @@ Status: accepted as the basis for implementation planning, 2026-11-14. Admin por
 ## Access model
 
 1. Keep the existing assigned admin role.
-2. Add `additionalPermissions: AdminPermission[]` to each admin, default empty. Effective global permissions are the deduplicated union of role permissions and individual additions. This version has no per-user deny overrides or multiple-role assignments.
+2. Add `additionalPermissions: AdminPermission[]` to each admin, default empty, excluding forms permissions (forms access is through a role or an assigned form only). Effective global permissions are the deduplicated union of role permissions and individual additions. This version has no per-user deny overrides or multiple-role assignments.
 3. Add per-form grants for an active admin: View results, with optional Export results. Export requires View. This grant authorises only that form's response table, approved response-field labels, analytics and optionally CSV. It does not authorise form editing, creating responses, cloning, publishing, deleting, templates, uploads, sharing or other forms.
 
 Example: an Event Coordinator role grants event access; one user additionally gets View Attendance and read-only results for Volunteer Registration. They can see that form's current responses, but not other forms or download its results unless export is granted.

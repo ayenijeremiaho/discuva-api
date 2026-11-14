@@ -183,7 +183,6 @@ export class FormAccessService {
       .innerJoin('admin.adminRole', 'role')
       .select([
         'admin.id',
-        'admin.additionalPermissions',
         'member.id',
         'member.firstname',
         'member.lastname',
@@ -206,9 +205,9 @@ export class FormAccessService {
     const data = admins.map((admin) => ({
       id: admin.id,
       member: admin.member,
-      globalAccess:
-        admin.adminRole.permissions.includes(AdminPermission.FORMS_READ) ||
-        admin.additionalPermissions.includes(AdminPermission.FORMS_READ),
+      globalAccess: admin.adminRole.permissions.includes(
+        AdminPermission.FORMS_READ,
+      ),
     }));
     return UtilityService.createPaginationResponse(
       data,

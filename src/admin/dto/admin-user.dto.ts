@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   IsEnum,
+  IsIn,
   IsArray,
   IsBoolean,
   IsNotEmpty,
@@ -12,14 +13,21 @@ import {
   MaxLength,
 } from 'class-validator';
 
-import { AdminPermission } from '../enum/admin-permission.enum';
+import {
+  AdminPermission,
+  INDIVIDUAL_PERMISSIONS,
+} from '../enum/admin-permission.enum';
 
 class AdditionalPermissionsDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
   @ArrayUnique()
-  @ArrayMaxSize(Object.values(AdminPermission).length)
-  @IsEnum(AdminPermission, { each: true })
+  @ArrayMaxSize(INDIVIDUAL_PERMISSIONS.length)
+  @IsIn(INDIVIDUAL_PERMISSIONS, {
+    each: true,
+    message:
+      'Forms access is given through a role or Assigned forms, not as an individual permission.',
+  })
   additionalPermissions?: AdminPermission[];
 }
 

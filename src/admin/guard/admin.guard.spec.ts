@@ -8,7 +8,7 @@ function setup(surface = SessionSurface.ADMIN) {
     id: 'admin',
     isActive: true,
     adminRole: { permissions: [] },
-    additionalPermissions: [P.FORMS_READ],
+    additionalPermissions: [P.MEMBERS_READ],
     member: { password: 'secret', deviceId: 'device' },
   };
   const repo = { findOne: jest.fn().mockResolvedValue(admin) };
@@ -20,7 +20,7 @@ function setup(surface = SessionSurface.ADMIN) {
   const reflector = {
     getAllAndOverride: jest
       .fn()
-      .mockReturnValueOnce(P.FORMS_READ)
+      .mockReturnValueOnce(P.MEMBERS_READ)
       .mockReturnValueOnce(false),
   };
   const guard = new AdminGuard(reflector as never, access, repo as never);

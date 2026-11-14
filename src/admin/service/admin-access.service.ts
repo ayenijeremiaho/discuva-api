@@ -2,10 +2,19 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { Admin } from '../entity/admin.entity';
-import { AdminPermission } from '../enum/admin-permission.enum';
+import {
+  AdminPermission,
+  NOT_INDIVIDUAL_PERMISSIONS,
+} from '../enum/admin-permission.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+
+// Additions never carry forms access, even if an older record stored one.
+const individual = (admin: Admin): AdminPermission[] =>
+  (admin.additionalPermissions ?? []).filter(
+    (p) => !NOT_INDIVIDUAL_PERMISSIONS.includes(p),
+  );
 
 @Injectable()
 export class AdminAccessService {
@@ -57,7 +66,7 @@ export class AdminAccessService {
     return [
       ...new Set([
         ...(admin.adminRole?.permissions ?? []),
-        ...((await this.isOn()) ? (admin.additionalPermissions ?? []) : []),
+        ...((await this.isOn()) ? individual(admin) : []),
       ]),
     ];
   }
@@ -68,7 +77,7 @@ export class AdminAccessService {
   ): Promise<boolean> {
     if (!admin || admin.isActive === false) return false;
     if (admin.adminRole?.permissions?.includes(permission)) return true;
-    if (!admin.additionalPermissions?.includes(permission)) return false;
+    if (!individual(admin).includes(permission)) return false;
     return this.isOn();
   }
 
@@ -78,7 +87,7 @@ export class AdminAccessService {
       (admin) =>
         admin.isActive !== false &&
         (admin.adminRole?.permissions?.includes(permission) ||
-          (enabled && admin.additionalPermissions?.includes(permission))),
+          (enabled && individual(admin).includes(permission))),
     );
   }
 

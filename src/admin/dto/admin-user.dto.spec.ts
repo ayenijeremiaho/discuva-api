@@ -25,4 +25,23 @@ describe('individual permission validation', () => {
       ),
     ).toEqual([]);
   });
+
+  it('refuses forms permissions as individual additions: those come through a role or Assigned forms', async () => {
+    for (const perm of [
+      AdminPermission.FORMS_READ,
+      AdminPermission.FORMS_WRITE,
+    ]) {
+      const errors = await validate(
+        plainToInstance(UpdateAdminUserDto, { additionalPermissions: [perm] }),
+      );
+      expect(JSON.stringify(errors)).toContain('Assigned forms');
+    }
+    expect(
+      await validate(
+        plainToInstance(UpdateAdminUserDto, {
+          additionalPermissions: [AdminPermission.MEMBERS_READ],
+        }),
+      ),
+    ).toEqual([]);
+  });
 });
