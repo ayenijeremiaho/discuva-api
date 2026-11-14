@@ -43,3 +43,22 @@ Scope: current local source checkouts, excluding dependencies, generated build o
 - Deploy API migrations/code before the UI, switch off; no migration reversions on production rollback.
 - Enable only an explicitly approved test organisation, verify live API/UI with limited/global accounts and revoke access, then approve broader activation separately.
 - Phase 4 compatibility remains a later local integration check; this feature does not import unreleased Phase 4 code.
+
+## Complete screenshot and help review (2026-11-14)
+
+Gallery: `/private/tmp/discuva-access-review/index.html`; image inventory: `manifest.json` beside it. **54 screenshots** cover 17 screens/states at 1280×900, 390×844 and 320×640, including three additional focused desktop panels. All browser captures passed with no page overflow or browser errors. These use synthetic API fixtures; no production account was accessed.
+
+| Screenshot prefix | Screen/state |
+| --- | --- |
+| 01–02 | Individual permission summary and editor |
+| 03 | User-side form assignment, view and optional export controls |
+| 04 | Revoke confirmation |
+| 05, 17 | Admin Users contextual help and common tasks |
+| 06 | Form-side access panel inside the existing submissions screen |
+| 07 | Forms contextual help |
+| 08 | Explanation that broader role/direct access still applies |
+| 09–10 | Assigned forms list and its help/FAQs |
+| 11–14 | View-only responses, analytics, results help and export-enabled responses |
+| 15–16 | Empty assignments and revoked/inaccessible form state |
+
+Help was opened and verified in the browser for Admin Users, Forms, Assigned forms and Results. It covers additive role/direct permissions, delegation and owner boundaries, assigning/revoking one form, optional export, broader access remaining after revocation, refresh behavior and the results-only restriction. Common tasks now use the actual controls: Revoke admin access → Confirm Revoke, Assigned forms → Save form access, and Submissions → Manage results access. Removed older instructions claiming an Active toggle or an email-edit control in the admin panel. Help source lint passed; no API behavior or database changes in this review.
