@@ -1211,37 +1211,37 @@ export class FormService {
     formId: string,
     page = 1,
     limit = 20,
-    // QUIZ leaderboard — highest score first, most recent first among ties.
-    // Meaningless for a non-QUIZ form (score is always null there), but
-    // harmless to accept regardless rather than 400ing on it.
     sortBy?: 'createdAt' | 'score',
   ): Promise<PaginationResponseDto<FormSubmission>> {
-    await this.getById(formId);
-    let data: FormSubmission[];
-    let total: number;
-    if (sortBy === 'score') {
-      // NULLS LAST, not TypeORM's plain `order` option (Postgres defaults
-      // DESC to NULLS FIRST) — otherwise a submission from before an admin
-      // added correctOptions to a question (still null score) would
-      // outrank every real scored submission on the leaderboard.
-      const qb = this.submissionRepo
-        .createQueryBuilder('submission')
-        .leftJoinAndSelect('submission.member', 'member')
-        .where('submission.form_id = :formId', { formId })
-        .orderBy('submission.score', 'DESC', 'NULLS LAST')
-        .addOrderBy('submission.createdAt', 'DESC')
-        .skip((page - 1) * limit)
-        .take(limit);
-      [data, total] = await qb.getManyAndCount();
-    } else {
-      [data, total] = await this.submissionRepo.findAndCount({
-        where: { form: { id: formId } },
-        relations: ['member'],
-        order: { createdAt: 'DESC' },
-        skip: (page - 1) * limit,
-        take: limit,
-      });
-    }
+    if (!(await this.formRepo.existsBy({ id: formId })))
+      throw new NotFoundException('Form not found.');
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    limit = Number.isFinite(limit)
+      ? Math.min(100, Math.max(1, Math.floor(limit)))
+      : 20;
+    const qb = this.submissionRepo
+      .createQueryBuilder('submission')
+      .leftJoin('submission.member', 'member')
+      .select([
+        'submission.id',
+        'submission.createdAt',
+        'submission.answers',
+        'submission.score',
+        'submission.maxScore',
+        'member.id',
+        'member.firstname',
+        'member.lastname',
+      ])
+      .where('submission.form_id = :formId', { formId });
+    if (sortBy === 'score')
+      qb.orderBy('submission.score', 'DESC', 'NULLS LAST');
+    else qb.orderBy('submission.createdAt', 'DESC');
+    if (sortBy === 'score') qb.addOrderBy('submission.createdAt', 'DESC');
+    const [data, total] = await qb
+      .addOrderBy('submission.id', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 

@@ -1,3 +1,6 @@
+import { Admin } from '../entity/admin.entity';
+import { mockAdminAccess } from '../testing/admin-access.mock';
+import { AdminAccessService } from './admin-access.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -9,6 +12,8 @@ import { AdminRoleService } from './admin-role.service';
 import { AdminRole } from '../entity/admin-role.entity';
 import { AdminPermission } from '../enum/admin-permission.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+
+const mockAdmins = { findOne: jest.fn(), existsBy: jest.fn() };
 
 const mockAdminRoleRepo = {
   existsBy: jest.fn(),
@@ -37,6 +42,11 @@ describe('AdminRoleService', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: getRepositoryToken(Admin),
+          useValue: mockAdmins,
+        },
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         AdminRoleService,
         { provide: getRepositoryToken(AdminRole), useValue: mockAdminRoleRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
@@ -149,5 +159,18 @@ describe('AdminRoleService', () => {
       const result = await service.getAll();
       expect(result).toHaveLength(1);
     });
+  });
+  it('does not let a non-owner change an owner through a shared role', async () => {
+    mockAdminAccess.isOn.mockResolvedValueOnce(true);
+    mockAdmins.findOne.mockResolvedValueOnce({
+      isOwner: false,
+      isActive: true,
+    });
+    mockAdmins.existsBy.mockResolvedValueOnce(true);
+    mockAdminRoleRepo.findOneBy.mockResolvedValueOnce(mockRole);
+    await expect(
+      service.update('role-1', { permissions: [] }, 'actor'),
+    ).rejects.toThrow('account owner');
+    expect(mockAdminRoleRepo.save).not.toHaveBeenCalled();
   });
 });

@@ -40,4 +40,4 @@ Test unchanged legacy roles, additive grants/removal, inherited permission prove
 
 Roll out separately from Phase 4, behind a switch defaulting off. With the switch off, preserve legacy roles and ignore the new grants. Turning it off revokes grant-derived access while preserving data for review. Migrations are additive and immutable; no production data reads or deployment without release instructions.
 
-Implementation sequence, proposed API contract, test gates and rollout: [ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md](ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md). Planning only; implementation has not started.
+Implementation sequence, proposed API contract, test gates and rollout: [ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md](ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md). Implementation is on the API/admin feature branches, default off; see [validation record](ADMIN_USER_FORM_ACCESS_VALIDATION.md).

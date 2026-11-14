@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -29,6 +30,7 @@ export interface ServiceRatingComment {
 @Injectable()
 export class ServiceRatingService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(ServiceRating)
     private readonly ratingRepo: Repository<ServiceRating>,
     @InjectRepository(ServiceSlot)
@@ -137,7 +139,8 @@ export class ServiceRatingService {
     totalCount: number;
     totalPages: number;
   }> {
-    const canModerate = admin.adminRole.permissions.includes(
+    const canModerate = await this.adminAccess.has(
+      admin,
       AdminPermission.SERVICE_RATING_MODERATE,
     );
 

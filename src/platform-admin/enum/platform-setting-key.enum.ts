@@ -42,6 +42,7 @@ export enum PlatformSettingKey {
   ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
   ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
   ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
+  ADMIN_ACCESS_MODE = 'admin_access_mode',
   DISCUVA_PROFILE_MODE = 'discuva_profile_mode',
   PHOTO_REPORT_REMOVALS = 'photo_report_removals',
   PHOTO_REPORT_WINDOW_DAYS = 'photo_report_window_days',

@@ -7,6 +7,7 @@ import {
   OneToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { AdminPermission } from '../enum/admin-permission.enum';
 import { Member } from '../../member/entity/member.entity';
 import { AdminRole } from './admin-role.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
@@ -28,6 +29,18 @@ export class Admin extends BaseEntity {
   })
   @JoinColumn({ name: 'admin_role_id' })
   adminRole: AdminRole;
+
+  @Column({
+    name: 'additional_permissions',
+    type: 'text',
+    array: true,
+    default: '{}',
+  })
+  additionalPermissions: AdminPermission[];
+
+  effectivePermissions?: AdminPermission[];
+  accessGrantsEnabled?: boolean;
+  hasAssignedForms?: boolean;
 
   @Column({ default: true })
   isActive: boolean;

@@ -1,6 +1,6 @@
 # Implementation plan: individual admin permissions and assigned forms
 
-Date: 2026-11-14. Based on ADMIN_USER_FORM_ACCESS_DESIGN.md. This document plans implementation; no runtime code or migrations are implemented by this change. Build separately from Phase 4 and the parked Google Sheets proposal.
+Date: 2026-11-14. Based on ADMIN_USER_FORM_ACCESS_DESIGN.md. Implementation is now on `feat/admin-user-form-access` in API/admin, default off; see ADMIN_USER_FORM_ACCESS_VALIDATION.md for checks and release gates. Build separately from Phase 4 and the parked Google Sheets proposal.
 
 ## 1. Agreed scope and access rules
 
@@ -68,7 +68,7 @@ All routes retain existing tenant, module and plan enforcement. Register static 
 | --- | --- |
 | Existing POST/PATCH `/admin/users` | Accept validated additionalPermissions; existing admin-management authority and protections |
 | Existing GET `/admin/users/me` and managed-user DTOs | Expose role permissions, direct grants and computed effectivePermissions separately; bootstrap includes hasAssignedForms |
-| GET `/admin/users/:id/form-access` | Access manager sees the subject's paginated form grants |
+| GET `/forms/access/admin/:adminId` | Access manager sees the subject's paginated form grants |
 | GET `/forms/:id/access` | Access manager sees the selected form's paginated grants |
 | PUT `/forms/:id/access/:adminId` | Transactional upsert of view/export choices through the shared policy/service |
 | DELETE `/forms/:id/access/:adminId` | Revoke; never delete the form or responses |
@@ -106,6 +106,7 @@ Phase 4 integration is a later local merge/check: preserve its overseer/closed-b
 - Quiz/vote/public responses: no new identity, answer-key or attachment disclosure through results context, analytics, CSV or counts.
 - List/search/options/metadata: no unassigned records, counts or configuration leak.
 - Feature off: legacy role behavior remains; new grant editing/routes are unavailable and grant-derived access is ignored.
+- Across the codebase, search for injected code that downloads and executes remote scripts, with particular attention to production Next.js and Tailwind configurations. Review any matches and record findings before release.
 
 ## 7. Release and rollback
 

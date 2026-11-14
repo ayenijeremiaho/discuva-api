@@ -9,11 +9,16 @@ import {
   Patch,
   Post,
   Query,
+  Put,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
+import { FormAccessService } from '../service/form-access.service';
+import { FormAccessQueryDto, SetFormAccessDto } from '../dto/form-access.dto';
 import { Response } from 'express';
 import 'multer';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -60,10 +65,77 @@ function imageOnlyFilter(
 export class FormAdminController {
   constructor(
     private readonly formService: FormService,
+    private readonly formAccess: FormAccessService,
     private readonly submissionService: FormSubmissionService,
     private readonly groupService: GroupService,
     private readonly builderTemplateService: BuilderTemplateService,
   ) {}
+
+  @Get('access/form-options')
+  formOptions(
+    @CurrentAdmin() actor: Admin,
+    @Query() query: FormAccessQueryDto,
+  ) {
+    return this.formAccess.formOptions(actor, query);
+  }
+
+  @Get('access/admin-options')
+  adminOptions(
+    @CurrentAdmin() actor: Admin,
+    @Query() query: FormAccessQueryDto,
+  ) {
+    return this.formAccess.adminOptions(actor, query);
+  }
+
+  @Get('access/admin/:adminId')
+  assignedTo(
+    @CurrentAdmin() actor: Admin,
+    @Param('adminId', ParseUUIDPipe) adminId: string,
+    @Query() query: FormAccessQueryDto,
+  ) {
+    return this.formAccess.assignedTo(actor, adminId, query);
+  }
+
+  @Get('shared')
+  shared(@CurrentAdmin() admin: Admin, @Query() query: FormAccessQueryDto) {
+    return this.formAccess.shared(admin, query);
+  }
+
+  @Get(':id/results-context')
+  resultsContext(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.formAccess.context(admin, id);
+  }
+
+  @Get(':id/access')
+  listAccess(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: FormAccessQueryDto,
+  ) {
+    return this.formAccess.listAccess(admin, id, query);
+  }
+
+  @Put(':id/access/:adminId')
+  setAccess(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('adminId', ParseUUIDPipe) adminId: string,
+    @Body() dto: SetFormAccessDto,
+  ) {
+    return this.formAccess.set(admin, id, adminId, dto);
+  }
+
+  @Delete(':id/access/:adminId')
+  revokeAccess(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('adminId', ParseUUIDPipe) adminId: string,
+  ) {
+    return this.formAccess.revoke(admin, id, adminId);
+  }
 
   @RequiresPermission(AdminPermission.FORMS_READ)
   @Get('templates')
@@ -222,14 +294,15 @@ export class FormAdminController {
     return this.formService.removeLogo(id);
   }
 
-  @RequiresPermission(AdminPermission.FORMS_READ)
   @Get(':id/submissions')
-  getSubmissions(
+  async getSubmissions(
+    @CurrentAdmin() admin: Admin,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('sortBy') sortBy?: 'createdAt' | 'score',
   ) {
+    await this.formAccess.assertResultAccess(admin, id);
     return this.formService.getSubmissions(
       id,
       page ? Number(page) : 1,
@@ -279,18 +352,22 @@ export class FormAdminController {
     ]);
   }
 
-  @RequiresPermission(AdminPermission.FORMS_READ)
   @Get(':id/analytics')
-  getAnalytics(@Param('id', ParseUUIDPipe) id: string) {
+  async getAnalytics(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.formAccess.assertResultAccess(admin, id);
     return this.formService.getAnalytics(id);
   }
 
-  @RequiresPermission(AdminPermission.FORMS_READ)
   @Get(':id/submissions/export')
   async exportSubmissions(
+    @CurrentAdmin() admin: Admin,
     @Param('id', ParseUUIDPipe) id: string,
     @Res() res: Response,
   ) {
+    await this.formAccess.assertResultAccess(admin, id, 'export');
     const csv = await this.formService.getSubmissionsCsv(id);
     res.set({
       'Content-Type': 'text/csv',

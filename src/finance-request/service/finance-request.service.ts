@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -57,6 +58,7 @@ export class FinanceRequestService {
   private readonly currencyLocale: string;
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(FinanceCategory)
     private readonly categoryRepo: Repository<FinanceCategory>,
     @InjectRepository(FinanceRequest)
@@ -594,9 +596,14 @@ export class FinanceRequestService {
         .innerJoinAndSelect('a.member', 'm')
         .innerJoin('a.adminRole', 'r')
         .where('a.isActive = true')
-        .andWhere(':perm = ANY(r.permissions)', {
-          perm: AdminPermission.FINANCE_WRITE,
-        })
+        .andWhere(
+          (await this.adminAccess.isOn())
+            ? '(:perm = ANY(r.permissions) OR :perm = ANY(a.additional_permissions))'
+            : ':perm = ANY(r.permissions)',
+          {
+            perm: AdminPermission.FINANCE_WRITE,
+          },
+        )
         .getMany(),
       this.tenantCurrencyService.resolveCurrencyCode(),
     ]);

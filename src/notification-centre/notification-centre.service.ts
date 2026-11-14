@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -84,6 +85,7 @@ export class NotificationCentreService {
   private readonly logger = new Logger(NotificationCentreService.name);
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     private readonly categories: EmailCategorySettingsService,
     private readonly usage: NotificationUsageService,
     private readonly allowance: EmailAllowanceService,
@@ -107,7 +109,7 @@ export class NotificationCentreService {
         this.optOutCounts(),
         this.allowance.status(),
         this.smsStatus(
-          admin.adminRole.permissions.includes(AdminPermission.SMS_READ),
+          await this.adminAccess.has(admin, AdminPermission.SMS_READ),
         ),
       ]);
 

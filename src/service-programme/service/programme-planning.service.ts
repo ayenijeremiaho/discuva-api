@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   Injectable,
@@ -87,6 +88,7 @@ export interface PlanningEvent {
 @Injectable()
 export class ProgrammePlanningService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(ServiceSlot)
     private readonly serviceSlotRepo: Repository<ServiceSlot>,
     @InjectRepository(ServiceProgramme)
@@ -334,9 +336,10 @@ export class ProgrammePlanningService {
       where: { member: { id: memberId }, isActive: true },
       relations: ['adminRole'],
     });
-    return admin?.adminRole.permissions.includes(
+    return (await this.adminAccess.has(
+      admin,
       AdminPermission.SERVICE_PROGRAMME_WRITE,
-    )
+    ))
       ? admin
       : null;
   }
