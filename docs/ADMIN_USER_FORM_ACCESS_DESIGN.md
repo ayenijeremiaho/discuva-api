@@ -1,6 +1,6 @@
 # Admin roles, individual permissions and assigned forms
 
-Status: proposed for review, 2026-11-14. Admin portal only. Department membership and member-app worker capabilities do not grant access through this design. Google Sheets sync remains a separate, parked proposal. No permission implementation or schema changes yet.
+Status: accepted as the basis for implementation planning, 2026-11-14. Admin portal only. Department membership and member-app worker capabilities do not grant access through this design. Google Sheets sync remains a separate, parked proposal. No permission implementation or schema changes yet.
 
 ## Access model
 
@@ -39,3 +39,5 @@ Filter form lists using indexed EXISTS/joins, not per-row permission queries or 
 Test unchanged legacy roles, additive grants/removal, inherited permission provenance, disabled users, owner/self-edit protection, cross-tenant and guessed-form IDs, view-without-export, export dependency, hidden metadata/attachments, quiz/vote privacy, revoke-on-next-request, minimal-role sign-in/navigation and batch notifications. Verify list filtering/counts and query plans with real migrations. Check desktop/phone UI and update help, API docs, Postman and admin release notes. No admin-only member-app release note.
 
 Roll out separately from Phase 4, behind a switch defaulting off. With the switch off, preserve legacy roles and ignore the new grants. Turning it off revokes grant-derived access while preserving data for review. Migrations are additive and immutable; no production data reads or deployment without release instructions.
+
+Implementation sequence, proposed API contract, test gates and rollout: [ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md](ADMIN_USER_FORM_ACCESS_IMPLEMENTATION_PLAN.md). Planning only; implementation has not started.
