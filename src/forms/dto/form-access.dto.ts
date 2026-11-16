@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
+import { FormResultsAccess } from '../enum/form.enum';
 import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
+  IsEnum,
+  IsUUID,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -32,6 +39,35 @@ export class FormAccessQueryDto {
 export class SetFormAccessDto {
   @IsBoolean()
   canView: boolean;
+
+  @IsBoolean()
+  canExport: boolean;
+}
+
+export class SetResultsAccessDto {
+  @IsEnum(FormResultsAccess)
+  resultsAccess: FormResultsAccess;
+}
+
+export class ShareFormWithManyDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  adminIds: string[];
+
+  @IsBoolean()
+  canExport: boolean;
+}
+
+export class ShareManyFormsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  formIds: string[];
 
   @IsBoolean()
   canExport: boolean;

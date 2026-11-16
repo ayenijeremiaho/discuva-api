@@ -40,6 +40,7 @@ export class Admin extends BaseEntity {
 
   effectivePermissions?: AdminPermission[];
   accessGrantsEnabled?: boolean;
+  formAccessEnabled?: boolean;
   hasAssignedForms?: boolean;
 
   @Column({ default: true })

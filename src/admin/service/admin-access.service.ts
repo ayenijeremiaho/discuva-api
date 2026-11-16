@@ -2,10 +2,19 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { Admin } from '../entity/admin.entity';
-import { AdminPermission } from '../enum/admin-permission.enum';
+import {
+  AdminPermission,
+  NOT_INDIVIDUAL_PERMISSIONS,
+} from '../enum/admin-permission.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+
+// Additions never carry forms access, even if an older record stored one.
+const individual = (admin: Admin): AdminPermission[] =>
+  (admin.additionalPermissions ?? []).filter(
+    (p) => !NOT_INDIVIDUAL_PERMISSIONS.includes(p),
+  );
 
 @Injectable()
 export class AdminAccessService {
@@ -15,20 +24,31 @@ export class AdminAccessService {
     private readonly cls: ClsService<AppClsStore>,
   ) {}
 
+  // Individual permissions: extra global permissions for one admin on top of their role.
   isOn(): Promise<boolean> {
-    if (!this.cls.isActive()) return this.readMode();
-    let pending = this.cls.get('adminAccessMode');
+    return this.memo('adminAccessMode', PlatformSettingKey.ADMIN_ACCESS_MODE);
+  }
+
+  // Assigned forms: one form's results shared with one admin. Its own switch, independent of individual permissions.
+  isFormAccessOn(): Promise<boolean> {
+    return this.memo('formAccessMode', PlatformSettingKey.FORM_ACCESS_MODE);
+  }
+
+  private memo(
+    slot: 'adminAccessMode' | 'formAccessMode',
+    key: PlatformSettingKey,
+  ): Promise<boolean> {
+    if (!this.cls.isActive()) return this.readMode(key);
+    let pending = this.cls.get(slot);
     if (!pending) {
-      pending = this.readMode();
-      this.cls.set('adminAccessMode', pending);
+      pending = this.readMode(key);
+      this.cls.set(slot, pending);
     }
     return pending;
   }
 
-  private async readMode(): Promise<boolean> {
-    const mode = await this.settings.getNumber(
-      PlatformSettingKey.ADMIN_ACCESS_MODE,
-    );
+  private async readMode(key: PlatformSettingKey): Promise<boolean> {
+    const mode = await this.settings.getNumber(key);
     if (mode === 2) return true;
     if (mode !== 1) return false;
     const tenantId = this.cls.get('tenantId');
@@ -46,7 +66,7 @@ export class AdminAccessService {
     return [
       ...new Set([
         ...(admin.adminRole?.permissions ?? []),
-        ...((await this.isOn()) ? (admin.additionalPermissions ?? []) : []),
+        ...((await this.isOn()) ? individual(admin) : []),
       ]),
     ];
   }
@@ -57,7 +77,7 @@ export class AdminAccessService {
   ): Promise<boolean> {
     if (!admin || admin.isActive === false) return false;
     if (admin.adminRole?.permissions?.includes(permission)) return true;
-    if (!admin.additionalPermissions?.includes(permission)) return false;
+    if (!individual(admin).includes(permission)) return false;
     return this.isOn();
   }
 
@@ -67,13 +87,18 @@ export class AdminAccessService {
       (admin) =>
         admin.isActive !== false &&
         (admin.adminRole?.permissions?.includes(permission) ||
-          (enabled && admin.additionalPermissions?.includes(permission))),
+          (enabled && individual(admin).includes(permission))),
     );
   }
 
   async assertEnabled(): Promise<void> {
     if (!(await this.isOn()))
-      throw new ForbiddenException('Individual access is not enabled.');
+      throw new ForbiddenException('Individual permissions are not enabled.');
+  }
+
+  async assertFormAccessEnabled(): Promise<void> {
+    if (!(await this.isFormAccessOn()))
+      throw new ForbiddenException('Assigned forms are not enabled.');
   }
 
   async assertCanDelegate(
@@ -98,6 +123,7 @@ export class AdminAccessService {
   async describe(admin: Admin): Promise<Admin> {
     admin.effectivePermissions = await this.permissions(admin);
     admin.accessGrantsEnabled = await this.isOn();
+    admin.formAccessEnabled = await this.isFormAccessOn();
     return admin;
   }
 }

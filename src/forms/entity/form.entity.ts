@@ -14,6 +14,7 @@ import {
   FormPurpose,
   FormVisibility,
   FormFieldVisibilityOperator,
+  FormResultsAccess,
 } from '../enum/form.enum';
 import { FormField } from './form-field.entity';
 import { FormSubmission } from './form-submission.entity';
@@ -62,6 +63,13 @@ export class Form extends BaseEntity {
   @Index()
   @Column({ default: FormVisibility.MEMBERS })
   visibility: FormVisibility;
+
+  @Column({
+    name: 'results_access',
+    type: 'character varying',
+    default: FormResultsAccess.OPEN,
+  })
+  resultsAccess: FormResultsAccess;
 
   @Index('IDX_forms_event_id')
   @ManyToOne(() => Event, { nullable: true, onDelete: 'SET NULL' })

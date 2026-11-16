@@ -273,7 +273,7 @@ export class AdminService {
     }
     await this.access.describe(admin);
     admin.hasAssignedForms =
-      admin.accessGrantsEnabled &&
+      admin.formAccessEnabled &&
       (await this.formAccessRepository.existsBy({
         adminId: id,
         canView: true,
@@ -292,7 +292,7 @@ export class AdminService {
 
   async assertCanRecoverFormAccess(actor: Admin, target: Admin): Promise<void> {
     if (
-      !(await this.access.isOn()) ||
+      !(await this.access.isFormAccessOn()) ||
       (await this.access.has(actor, AdminPermission.FORMS_READ))
     )
       return;

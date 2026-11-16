@@ -18,7 +18,13 @@ import {
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FormAccessService } from '../service/form-access.service';
-import { FormAccessQueryDto, SetFormAccessDto } from '../dto/form-access.dto';
+import {
+  FormAccessQueryDto,
+  SetFormAccessDto,
+  SetResultsAccessDto,
+  ShareFormWithManyDto,
+  ShareManyFormsDto,
+} from '../dto/form-access.dto';
 import { Response } from 'express';
 import 'multer';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -116,6 +122,38 @@ export class FormAdminController {
     @Query() query: FormAccessQueryDto,
   ) {
     return this.formAccess.listAccess(admin, id, query);
+  }
+
+  @Put('access/admin/:adminId')
+  shareManyForms(
+    @CurrentAdmin() actor: Admin,
+    @Param('adminId', ParseUUIDPipe) adminId: string,
+    @Body() dto: ShareManyFormsDto,
+  ) {
+    return this.formAccess.setMany(
+      actor,
+      dto.formIds,
+      [adminId],
+      dto.canExport,
+    );
+  }
+
+  @Patch(':id/results-access')
+  setResultsAccess(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetResultsAccessDto,
+  ) {
+    return this.formAccess.setResultsAccess(admin, id, dto.resultsAccess);
+  }
+
+  @Put(':id/access')
+  shareWithMany(
+    @CurrentAdmin() admin: Admin,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ShareFormWithManyDto,
+  ) {
+    return this.formAccess.setMany(admin, [id], dto.adminIds, dto.canExport);
   }
 
   @Put(':id/access/:adminId')

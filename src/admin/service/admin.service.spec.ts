@@ -256,7 +256,7 @@ describe('AdminService', () => {
   });
   describe('recovery of assigned-form admins', () => {
     it('blocks account recovery that would bypass resource-scoped access', async () => {
-      mockAdminAccess.isOn.mockResolvedValueOnce(true);
+      mockAdminAccess.isFormAccessOn.mockResolvedValueOnce(true);
       mockAdminAccess.has.mockResolvedValueOnce(false);
       mockFormAccessRepo.existsBy.mockResolvedValueOnce(true);
       await expect(
@@ -271,7 +271,7 @@ describe('AdminService', () => {
       });
     });
     it('does not query form grants for a global form reader', async () => {
-      mockAdminAccess.isOn.mockResolvedValueOnce(true);
+      mockAdminAccess.isFormAccessOn.mockResolvedValueOnce(true);
       mockAdminAccess.has.mockResolvedValueOnce(true);
       await service.assertCanRecoverFormAccess(mockAdmin, mockAdmin);
       expect(mockFormAccessRepo.existsBy).not.toHaveBeenCalled();

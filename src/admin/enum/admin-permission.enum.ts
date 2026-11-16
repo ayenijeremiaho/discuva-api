@@ -90,6 +90,15 @@ export enum AdminPermission {
   COMMUNITY_MODERATE = 'community:moderate',
 }
 
+// Forms are given through a role or Assigned forms, never as an individual addition.
+export const NOT_INDIVIDUAL_PERMISSIONS: readonly AdminPermission[] = [
+  AdminPermission.FORMS_READ,
+  AdminPermission.FORMS_WRITE,
+];
+export const INDIVIDUAL_PERMISSIONS = Object.values(AdminPermission).filter(
+  (p) => !NOT_INDIVIDUAL_PERMISSIONS.includes(p),
+);
+
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.MEMBERS_READ]: 'View Members',
   [AdminPermission.MEMBERS_WRITE]: 'Manage Members',

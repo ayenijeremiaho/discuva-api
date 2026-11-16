@@ -179,8 +179,15 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     max: 30,
   },
   [PlatformSettingKey.ADMIN_ACCESS_MODE]: {
-    label: 'Individual Admin and Form Access',
+    label: 'Individual Admin Permissions',
     unit: '0 = off, 1 = test organisations (ADMIN_ACCESS_TEST_TENANTS), 2 = every organisation',
+    defaultValue: 0,
+    min: 0,
+    max: 2,
+  },
+  [PlatformSettingKey.FORM_ACCESS_MODE]: {
+    label: 'Assigned Forms',
+    unit: '0 = off, 1 = test organisations (ADMIN_ACCESS_TEST_TENANTS), 2 = every organisation. Independent of individual permissions',
     defaultValue: 0,
     min: 0,
     max: 2,

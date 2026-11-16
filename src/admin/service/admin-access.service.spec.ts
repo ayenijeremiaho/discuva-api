@@ -83,4 +83,45 @@ describe('AdminAccessService', () => {
       ),
     ).resolves.toBeUndefined();
   });
+
+  describe('individual permissions and assigned forms are switched separately', () => {
+    const modes = (permissions: number, forms: number) => {
+      const t = setup();
+      t.settings.getNumber.mockImplementation(async (key: string) =>
+        key === 'admin_access_mode' ? permissions : forms,
+      );
+      return t.service;
+    };
+
+    it('assigned forms work while individual permissions are off', async () => {
+      const service = modes(0, 2);
+      await expect(service.assertFormAccessEnabled()).resolves.toBeUndefined();
+      await expect(service.assertEnabled()).rejects.toThrow(
+        'Individual permissions are not enabled.',
+      );
+      const described = await service.describe(admin([], [P.MEMBERS_READ]));
+      expect(described.formAccessEnabled).toBe(true);
+      expect(described.accessGrantsEnabled).toBe(false);
+      expect(described.effectivePermissions).toEqual([]);
+    });
+
+    it('individual permissions work while assigned forms are off', async () => {
+      const service = modes(2, 0);
+      await expect(service.assertFormAccessEnabled()).rejects.toThrow(
+        'Assigned forms are not enabled.',
+      );
+      const described = await service.describe(admin([], [P.MEMBERS_READ]));
+      expect(described.accessGrantsEnabled).toBe(true);
+      expect(described.formAccessEnabled).toBe(false);
+      expect(described.effectivePermissions).toEqual([P.MEMBERS_READ]);
+    });
+  });
+
+  it('never grants forms access from an individual addition, even one stored earlier', async () => {
+    const { service } = setup();
+    const user = admin([], [P.FORMS_READ, P.FORMS_WRITE, P.MEMBERS_READ]);
+    expect(await service.permissions(user)).toEqual([P.MEMBERS_READ]);
+    expect(await service.has(user, P.FORMS_READ)).toBe(false);
+    expect(await service.filter([user], P.FORMS_WRITE)).toEqual([]);
+  });
 });

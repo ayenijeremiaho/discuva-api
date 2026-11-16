@@ -59,3 +59,9 @@ export enum FormFieldVisibilityOperator {
   // match for a free-text target.
   INCLUDES = 'includes',
 }
+
+// Who sees a form's responses: everyone whose role can view forms, or only the people chosen on it.
+export enum FormResultsAccess {
+  OPEN = 'OPEN',
+  RESTRICTED = 'RESTRICTED',
+}
