@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FormAdminAccess } from '../../admin/entity/form-admin-access.entity';
 import { AdminAccessService } from '../../admin/service/admin-access.service';
@@ -14,6 +14,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { Form } from '../entity/form.entity';
+import { FormResultsAccess } from '../enum/form.enum';
 import { FormField } from '../entity/form-field.entity';
 import { FormAccessQueryDto, SetFormAccessDto } from '../dto/form-access.dto';
 
@@ -30,14 +31,30 @@ export class FormAccessService {
     private readonly audit: AuditLogService,
   ) {}
 
+  // Owners and form builders always; an open form to anyone whose role views forms; otherwise only people chosen on it.
   async assertResultAccess(
     admin: Admin,
     formId: string,
     action: 'view' | 'export' = 'view',
   ): Promise<boolean> {
     if (!admin?.isActive) throw new ForbiddenException('Form access required.');
-    if (await this.access.has(admin, AdminPermission.FORMS_READ)) return true;
-    await this.access.assertFormAccessEnabled();
+    const readsAll = await this.access.has(admin, AdminPermission.FORMS_READ);
+    if (!(await this.access.isFormAccessOn())) {
+      if (readsAll) return true;
+      throw new ForbiddenException('Assigned forms are not enabled.');
+    }
+    if (
+      admin.isOwner ||
+      (await this.access.has(admin, AdminPermission.FORMS_WRITE))
+    )
+      return true;
+    const form = await this.forms.findOne({
+      where: { id: formId },
+      select: { id: true, resultsAccess: true },
+    });
+    if (!form) throw new NotFoundException('Form not found.');
+    if (form.resultsAccess !== FormResultsAccess.RESTRICTED && readsAll)
+      return true;
     const grant = await this.grants.findOne({
       where: {
         formId,
@@ -49,6 +66,76 @@ export class FormAccessService {
     });
     if (!grant) throw new NotFoundException('Form not found.');
     return grant.canExport;
+  }
+
+  async setResultsAccess(
+    actor: Admin,
+    formId: string,
+    resultsAccess: FormResultsAccess,
+  ): Promise<{ resultsAccess: FormResultsAccess }> {
+    await this.assertManager(actor);
+    await this.assertForm(formId);
+    await this.forms.update({ id: formId }, { resultsAccess });
+    this.audit.log('FORM_RESULTS_ACCESS_CHANGED', {
+      actorId: actor.member.id,
+      targetId: formId,
+      metadata: { resultsAccess },
+    });
+    return { resultsAccess };
+  }
+
+  // Several people on one form, or several forms for one person, in one save.
+  async setMany(
+    actor: Admin,
+    formIds: string[],
+    adminIds: string[],
+    canExport: boolean,
+  ): Promise<{ saved: number }> {
+    await this.assertManager(actor);
+    const [forms, targets] = await Promise.all([
+      this.forms.find({ where: { id: In(formIds) }, select: { id: true } }),
+      this.admins.find({
+        where: { id: In(adminIds), isActive: true },
+        relations: ['member'],
+        select: {
+          id: true,
+          isActive: true,
+          isOwner: true,
+          member: { id: true },
+        },
+      }),
+    ]);
+    if (forms.length !== new Set(formIds).size)
+      throw new NotFoundException('Form not found.');
+    if (targets.length !== new Set(adminIds).size)
+      throw new NotFoundException('Active admin not found.');
+    for (const target of targets) {
+      if (target.id === actor.id)
+        throw new ForbiddenException(
+          'You cannot modify your own admin record.',
+        );
+      await this.owners.assertCanChange(target, actor.member.id);
+    }
+    const rows = forms.flatMap((form) =>
+      targets.map((target) => ({
+        formId: form.id,
+        adminId: target.id,
+        canView: true,
+        canExport,
+      })),
+    );
+    await this.grants.upsert(rows, ['formId', 'adminId']);
+    for (const row of rows) {
+      this.audit.log('FORM_ACCESS_GRANTED', {
+        actorId: actor.member.id,
+        targetId: row.adminId,
+        metadata: {
+          formId: row.formId,
+          formAccessTo: { canView: true, canExport },
+        },
+      });
+    }
+    return { saved: rows.length };
   }
 
   private async assertManager(actor: Admin): Promise<void> {

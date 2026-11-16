@@ -35,6 +35,7 @@ function setup() {
   };
   const access = {
     assertFormAccessEnabled: jest.fn().mockResolvedValue(undefined),
+    isFormAccessOn: jest.fn().mockResolvedValue(true),
     has: jest.fn().mockResolvedValue(false),
   };
   const owners = { assertCanChange: jest.fn().mockResolvedValue(undefined) };
@@ -89,9 +90,9 @@ describe('FormAccessService', () => {
     await expect(
       service.assertResultAccess({ ...actor, isActive: false }, 'form-a'),
     ).rejects.toThrow();
-    access.assertFormAccessEnabled.mockRejectedValue(new Error('disabled'));
+    access.isFormAccessOn.mockResolvedValue(false);
     await expect(service.assertResultAccess(actor, 'form-a')).rejects.toThrow(
-      'disabled',
+      'not enabled',
     );
     expect(grants.findOne).not.toHaveBeenCalled();
   });
@@ -167,5 +168,109 @@ describe('FormAccessService', () => {
         metadata: expect.objectContaining({ formAccessFrom: null }),
       }),
     );
+  });
+
+  describe('open and restricted forms', () => {
+    const perms = (granted: string[]) => async (_a: unknown, p: string) =>
+      granted.includes(p);
+
+    it('lets a role that views forms see an open form without looking up grants', async () => {
+      const { service, forms, grants, access } = setup();
+      access.has.mockImplementation(perms(['forms:read']));
+      forms.findOne.mockResolvedValue({ id: 'f', resultsAccess: 'OPEN' });
+      await expect(service.assertResultAccess(actor, 'f')).resolves.toBe(true);
+      expect(grants.findOne).not.toHaveBeenCalled();
+    });
+
+    it('keeps a restricted form to the people chosen on it, even from a role that views forms', async () => {
+      const { service, forms, grants, access } = setup();
+      access.has.mockImplementation(perms(['forms:read']));
+      forms.findOne.mockResolvedValue({ id: 'f', resultsAccess: 'RESTRICTED' });
+      await expect(service.assertResultAccess(actor, 'f')).rejects.toThrow(
+        'not found',
+      );
+      grants.findOne.mockResolvedValue({ canExport: false });
+      await expect(service.assertResultAccess(actor, 'f')).resolves.toBe(false);
+    });
+
+    it('always lets owners and form builders see a restricted form', async () => {
+      const { service, forms } = setup();
+      forms.findOne.mockResolvedValue({ id: 'f', resultsAccess: 'RESTRICTED' });
+      await expect(
+        service.assertResultAccess({ ...actor, isOwner: true }, 'f'),
+      ).resolves.toBe(true);
+      const builder = setup();
+      builder.access.has.mockImplementation(perms(['forms:write']));
+      await expect(
+        builder.service.assertResultAccess(actor, 'f'),
+      ).resolves.toBe(true);
+    });
+
+    it("keeps today's behaviour while assigned forms are off: role decides, restriction ignored", async () => {
+      const { service, forms, access } = setup();
+      access.isFormAccessOn.mockResolvedValue(false);
+      access.has.mockImplementation(perms(['forms:read']));
+      forms.findOne.mockResolvedValue({ id: 'f', resultsAccess: 'RESTRICTED' });
+      await expect(service.assertResultAccess(actor, 'f')).resolves.toBe(true);
+    });
+
+    it('switches a form between open and restricted, for access managers only', async () => {
+      const { service, forms, access } = setup();
+      (forms as unknown as { update: jest.Mock }).update = jest.fn();
+      await expect(
+        service.setResultsAccess(actor, 'f', 'RESTRICTED' as never),
+      ).rejects.toThrow('permissions');
+      access.has.mockResolvedValue(true);
+      await expect(
+        service.setResultsAccess(actor, 'f', 'RESTRICTED' as never),
+      ).resolves.toEqual({ resultsAccess: 'RESTRICTED' });
+    });
+  });
+
+  describe('sharing several at once', () => {
+    it('gives several people one form, or one person several forms, in a single write', async () => {
+      const { service, forms, admins, access, grants } = setup();
+      access.has.mockResolvedValue(true);
+      (forms as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([{ id: 'f1' }, { id: 'f2' }]);
+      (admins as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'a1', isActive: true, member: { id: 'm1' } },
+        ]);
+      await expect(
+        service.setMany(actor, ['f1', 'f2'], ['a1'], true),
+      ).resolves.toEqual({ saved: 2 });
+      expect(grants.upsert).toHaveBeenCalledTimes(1);
+      expect(grants.upsert).toHaveBeenCalledWith(
+        [
+          { formId: 'f1', adminId: 'a1', canView: true, canExport: true },
+          { formId: 'f2', adminId: 'a1', canView: true, canExport: true },
+        ],
+        ['formId', 'adminId'],
+      );
+    });
+
+    it('refuses the whole save if one person is not an active admin, or is yourself', async () => {
+      const { service, forms, admins, access, grants } = setup();
+      access.has.mockResolvedValue(true);
+      (forms as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([{ id: 'f1' }]);
+      (admins as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([{ id: 'a1', isActive: true, member: {} }]);
+      await expect(
+        service.setMany(actor, ['f1'], ['a1', 'gone'], false),
+      ).rejects.toThrow('Active admin not found');
+      (admins as unknown as { find: jest.Mock }).find.mockResolvedValue([
+        actor,
+      ]);
+      await expect(
+        service.setMany(actor, ['f1'], ['actor'], false),
+      ).rejects.toThrow('own');
+      expect(grants.upsert).not.toHaveBeenCalled();
+    });
   });
 });

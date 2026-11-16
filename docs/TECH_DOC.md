@@ -23792,7 +23792,9 @@ Implemented on `feat/admin-user-form-access`, separate from Phase 4. Default off
 
 Tenant migrations `1805961600000-AddAdminAccessGrants` and `1806048000000-IndexFormResultsOrdering` add the empty-default array, `form_admin_access`, and response ordering indexes. Grant FKs cascade on admin/form deletion; UNIQUE `(form_id, admin_id)` and reverse `(admin_id, form_id)` cover both management directions and scoped checks. CHECK disallows export without view. Response indexes match `(form_id, created_at DESC, id DESC)` and `(form_id, score DESC NULLS LAST, created_at DESC, id DESC)`. Response pagination is capped at 100 with deterministic ordering and selects only member ID/name, rather than a full member profile. Existing global `FORMS_READ` retains all-form read/analytics/export access.
 
-All routes below use ADMIN-surface authentication, tenant context and existing Forms module/plan guards. Access managers need effective `ADMIN_WRITE` plus global `FORMS_READ`. They cannot change their own form grants or another owner without owner authority. Form routes need `form_access_mode` on (otherwise 403 "Assigned forms are not enabled."), not `admin_access_mode`. Writes use the existing tenant request transaction and audit `FORM_ACCESS_GRANTED` / `FORM_ACCESS_REVOKED` with form IDs and grant changes; individual permission changes stay under `ADMIN_USER_UPDATED`.
+All routes below use ADMIN-surface authentication, tenant context and existing Forms module/plan guards. Access managers need effective `ADMIN_WRITE` plus global `FORMS_READ`. They cannot change their own form grants or another owner without owner authority. Form routes need `form_access_mode` on (otherwise 403 "Assigned forms are not enabled."), not `admin_access_mode`.
+
+**Who sees a form's responses** (`forms.results_access`, tenant migration `1806307200000-AddFormResultsAccess`, default `OPEN`): with `form_access_mode` on, owners and anyone with `forms:write` always do; on an `OPEN` form, anyone with `forms:read`; on a `RESTRICTED` form, only people chosen on it (plus owners and builders). Chosen people see the form either way, with export only if granted. With `form_access_mode` off the column is ignored and `forms:read` decides, as before. The check reads the form by primary key, then a grant only when needed; no new index. Form access is managed only from the Forms module; Admin Users no longer shows it. Writes use the existing tenant request transaction and audit `FORM_ACCESS_GRANTED` / `FORM_ACCESS_REVOKED` with form IDs and grant changes; individual permission changes stay under `ADMIN_USER_UPDATED`.
 
 | Endpoint | Behavior |
 | --- | --- |
@@ -23805,6 +23807,9 @@ All routes below use ADMIN-surface authentication, tenant context and existing F
 | GET `/forms/:id/access` | Paginated form-side grant list, minimal recipient identity |
 | GET `/forms/access/admin/:adminId` | Paginated user-side assignments, minimal form identity |
 | GET `/forms/access/admin-options`, `/forms/access/form-options` | Searchable/paginated minimal pickers for managers |
+| PATCH `/forms/:id/results-access` | `{resultsAccess: 'OPEN' \| 'RESTRICTED'}`; audit `FORM_RESULTS_ACCESS_CHANGED` |
+| PUT `/forms/:id/access` | Several people on one form: `{adminIds: uuid[] (1–50), canExport}`; one upsert |
+| PUT `/forms/access/admin/:adminId` | Several forms for one person: `{formIds: uuid[] (1–50), canExport}`; one upsert |
 | PUT `/forms/:id/access/:adminId` | Upsert `{canView:true, canExport:boolean}`; export deliberately opt-in |
 | DELETE `/forms/:id/access/:adminId` | Revoke individual assignment; broader role/direct permissions still apply |
 

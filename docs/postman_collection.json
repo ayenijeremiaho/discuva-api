@@ -13716,6 +13716,112 @@
             "description": "Removes individual grant. Does not narrow existing role/direct global access."
           },
           "response": []
+        },
+        {
+          "name": "Set Form Results Access",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/:id/results-access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                ":id",
+                "results-access"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access managers (admin:write + forms:read). OPEN: anyone whose role views forms sees responses. RESTRICTED: only people chosen on the form, plus owners and form builders. Needs Assigned Forms (form_access_mode) on.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resultsAccess\": \"RESTRICTED\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Share Form With Several People",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/:id/access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                ":id",
+                "access"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access managers. Gives 1–50 admins view (and optional export) of this form in one save.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminIds\": [\n    \"uuid\"\n  ],\n  \"canExport\": false\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Share Several Forms With One Person",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/access/admin/:adminId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "access",
+                "admin",
+                ":adminId"
+              ],
+              "variable": [
+                {
+                  "key": "adminId",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Access managers. Gives one admin view (and optional export) of 1–50 forms in one save.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"formIds\": [\n    \"uuid\"\n  ],\n  \"canExport\": false\n}"
+            }
+          },
+          "response": []
         }
       ]
     },
