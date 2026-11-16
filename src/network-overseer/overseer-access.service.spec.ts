@@ -18,6 +18,7 @@ describe('OverseerAccessService', () => {
   let here = 'branch-1';
   const cls = { get: jest.fn(() => here) };
   const tx = { query: jest.fn().mockResolvedValue(undefined) };
+  const accounts = { isNetworkOn: jest.fn().mockResolvedValue(true) };
   const service = new OverseerAccessService(
     overseers as never,
     tenants as never,
@@ -26,6 +27,7 @@ describe('OverseerAccessService', () => {
     audit as never,
     cls as never,
     { tx } as never,
+    accounts as never,
   );
   const overseer = {
     id: 'ov-1',
@@ -43,6 +45,7 @@ describe('OverseerAccessService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     here = 'branch-1';
+    accounts.isNetworkOn.mockResolvedValue(true);
     overseers.findOne.mockResolvedValue(overseer);
     tenants.findOne.mockResolvedValue({
       id: 'branch-1',
@@ -87,6 +90,13 @@ describe('OverseerAccessService', () => {
 
   it('refuses once the overseer is removed', async () => {
     overseers.findOne.mockResolvedValue(null);
+    await expect(service.validatePass(pass)).rejects.toThrow(
+      'Your overseer access has ended.',
+    );
+  });
+
+  it('refuses a pass once networks are switched off for the branch', async () => {
+    accounts.isNetworkOn.mockResolvedValue(false);
     await expect(service.validatePass(pass)).rejects.toThrow(
       'Your overseer access has ended.',
     );

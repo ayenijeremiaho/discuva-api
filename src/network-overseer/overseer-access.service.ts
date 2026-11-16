@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { NetworkOverseer } from './network-overseer.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { CacheService } from '../utility/service/cache.service';
+import { DiscuvaAccountService } from '../discuva-account/service/discuva-account.service';
 import { AuditLogService } from '../utility/service/audit-log.service';
 import { AppClsStore } from '../tenant/interface/tenant-cls-store.interface';
 import { SessionSurface } from '../auth/enum/session-surface.enum';
@@ -56,6 +57,7 @@ export class OverseerAccessService {
     private readonly audit: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly accounts: DiscuvaAccountService,
   ) {}
 
   async issuePass(
@@ -79,17 +81,19 @@ export class OverseerAccessService {
     };
   }
 
-  // A pass is good only at the branch it names, while its holder is still an overseer of that branch's network.
+  // A pass is good only at the branch it names, while networks are on there and its holder still oversees that network.
   async validatePass(payload: JwtPayload): Promise<OverseerAuth> {
     const here = this.cls.get('tenantId');
     if (!payload.tenantId || payload.tenantId !== here) {
       throw new UnauthorizedException('This pass is for another church.');
     }
-    const [overseer, branch] = await Promise.all([
+    const [overseer, branch, networksOn] = await Promise.all([
       this.overseer(payload.sub),
       this.branch(here),
+      this.accounts.isNetworkOn(),
     ]);
     if (
+      !networksOn ||
       !overseer ||
       !branch.networkRootId ||
       branch.networkRootId !== overseer.networkRootId ||
