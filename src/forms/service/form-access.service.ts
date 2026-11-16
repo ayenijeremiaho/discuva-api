@@ -343,7 +343,7 @@ export class FormAccessService {
     const canExport = await this.assertResultAccess(admin, formId);
     const form = await this.forms.findOne({
       where: { id: formId },
-      select: { id: true, title: true, purpose: true },
+      select: { id: true, title: true, purpose: true, resultsAccess: true },
     });
     if (!form) throw new NotFoundException('Form not found.');
     const fields = await this.fields.find({

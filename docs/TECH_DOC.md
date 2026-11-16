@@ -23801,7 +23801,7 @@ All routes below use ADMIN-surface authentication, tenant context and existing F
 | POST `/admin/users`, PATCH `/admin/users/:id` | Optional unique validated `additionalPermissions` enum array; editing requires feature on |
 | GET `/admin/users`, `/admin/users/:id`, `/admin/users/me` | Separate role, additional, `effectivePermissions`, `accessGrantsEnabled` (individual permissions on), `formAccessEnabled` (assigned forms on); profile additionally includes indexed `hasAssignedForms` EXISTS when assigned forms are on |
 | GET `/forms/shared` | Explicit assignments only, paginated with filtered totals/search; never grants global read |
-| GET `/forms/:id/results-context` | Global read or scoped view; minimal form ID/title/purpose and field ID/label/type/order; `canExport`; no builder configuration/answer keys |
+| GET `/forms/:id/results-context` | Global read or scoped view; minimal form ID/title/purpose/resultsAccess and field ID/label/type/order; `canExport`; no builder configuration/answer keys |
 | GET `/forms/:id/submissions`, `/forms/:id/analytics` | Global read or target view grant |
 | GET `/forms/:id/submissions/export` | Global read or target view+export grant |
 | GET `/forms/:id/access` | Paginated form-side grant list, minimal recipient identity |
