@@ -49,7 +49,7 @@ function setup() {
     owners as never,
     audit as never,
   );
-  return { service, grants, forms, fields, admins, access, audit };
+  return { service, grants, forms, fields, admins, access, audit, owners };
 }
 describe('FormAccessService', () => {
   it('requires a target-specific view grant without loading grants for global readers', async () => {
@@ -271,6 +271,24 @@ describe('FormAccessService', () => {
         service.setMany(actor, ['f1'], ['actor'], false),
       ).rejects.toThrow('own');
       expect(grants.upsert).not.toHaveBeenCalled();
+    });
+
+    it('only an owner can share with an owner, checked without another lookup', async () => {
+      const { service, forms, admins, access, owners } = setup();
+      access.has.mockResolvedValue(true);
+      (forms as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([{ id: 'f1' }]);
+      (admins as unknown as { find: jest.Mock }).find = jest
+        .fn()
+        .mockResolvedValue([{ id: 'o1', isActive: true, isOwner: true }]);
+      await expect(
+        service.setMany(actor, ['f1'], ['o1'], false),
+      ).rejects.toThrow('owner');
+      await expect(
+        service.setMany({ ...actor, isOwner: true }, ['f1'], ['o1'], false),
+      ).resolves.toEqual({ saved: 1 });
+      expect(owners.assertCanChange).not.toHaveBeenCalled();
     });
   });
 });

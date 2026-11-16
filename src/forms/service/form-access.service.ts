@@ -114,7 +114,10 @@ export class FormAccessService {
         throw new ForbiddenException(
           'You cannot modify your own admin record.',
         );
-      await this.owners.assertCanChange(target, actor.member.id);
+      if (target.isOwner && !actor.isOwner)
+        throw new ForbiddenException(
+          'Only an account owner can change an owner.',
+        );
     }
     const rows = forms.flatMap((form) =>
       targets.map((target) => ({
@@ -125,16 +128,17 @@ export class FormAccessService {
       })),
     );
     await this.grants.upsert(rows, ['formId', 'adminId']);
-    for (const row of rows) {
+    for (const target of targets) {
       this.audit.log('FORM_ACCESS_GRANTED', {
         actorId: actor.member.id,
-        targetId: row.adminId,
+        targetId: target.id,
         metadata: {
-          formId: row.formId,
+          formIds: forms.map((form) => form.id),
           formAccessTo: { canView: true, canExport },
         },
       });
     }
+
     return { saved: rows.length };
   }
 
