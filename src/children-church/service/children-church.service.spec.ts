@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { MemberService } from '../../member/service/member.service';
 import { ChildrenChurchService } from './children-church.service';
 import { ChildAgeGroup } from '../entity/child-age-group.entity';
 import { ChildClassGroup } from '../entity/child-class-group.entity';
@@ -20,6 +21,13 @@ import { DepartmentAccessService } from '../../department/service/department-acc
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { getQueueToken } from '@nestjs/bull';
+import { ClsService } from 'nestjs-cls';
+import { ServiceSlot } from '../../event/entity/service-slot.entity';
+import { CHILDREN_LATE_QUEUE } from '../children-church.constants';
+
+const mockSlotRepo = { findOne: jest.fn() };
+const mockLateQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
 const mockAgeGroupRepo = {
   create: jest.fn(),
@@ -37,7 +45,7 @@ const mockClassGroupRepo = {
   remove: jest.fn(),
 };
 
-const mockChildProfileRepo = {
+const mockChildProfileRepo: any = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
@@ -47,12 +55,28 @@ const mockChildProfileRepo = {
 };
 
 const mockGuardianRepo = {
-  create: jest.fn(),
+  create: jest.fn((v) => v),
   save: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
   remove: jest.fn(),
+  exists: jest.fn().mockResolvedValue(false),
 };
+// The transaction hands back a manager whose saves land on the matching repo mock.
+const wireTransaction = () => {
+  mockGuardianRepo.create.mockImplementation((v) => v);
+  mockChildProfileRepo.manager = {
+    transaction: jest.fn((cb: (m: unknown) => unknown) =>
+      cb({
+        save: (target: { name: string }, v: unknown) =>
+          target.name === 'ChildGuardian'
+            ? mockGuardianRepo.save(v)
+            : mockChildProfileRepo.save(v),
+      }),
+    ),
+  };
+};
+const mockMemberService = { searchActiveMembersLite: jest.fn() };
 
 const mockCheckInRepo = {
   create: jest.fn(),
@@ -61,6 +85,8 @@ const mockCheckInRepo = {
   find: jest.fn(),
   existsBy: jest.fn(),
   count: jest.fn().mockResolvedValue(0),
+  findAndCount: jest.fn(),
+  createQueryBuilder: jest.fn(),
 };
 
 const mockMemberRepo = {};
@@ -129,6 +155,7 @@ describe('ChildrenChurchService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    wireTransaction();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -140,6 +167,20 @@ describe('ChildrenChurchService', () => {
           },
         },
         ChildrenChurchService,
+        { provide: MemberService, useValue: mockMemberService },
+        { provide: getRepositoryToken(ServiceSlot), useValue: mockSlotRepo },
+        {
+          provide: getQueueToken(CHILDREN_LATE_QUEUE),
+          useValue: mockLateQueue,
+        },
+        {
+          provide: ClsService,
+          useValue: {
+            isActive: () => true,
+            getId: () => 'req-1',
+            get: (k: string) => (k === 'tenantId' ? 't1' : 'tenant_t1'),
+          },
+        },
         {
           provide: getRepositoryToken(ChildAgeGroup),
           useValue: mockAgeGroupRepo,
@@ -424,6 +465,70 @@ describe('ChildrenChurchService', () => {
       );
       expect(result.ageGroup).toBeNull();
     });
+
+    it('accepts an age range instead of a date of birth', async () => {
+      mockChildProfileRepo.create.mockImplementation((v) => v);
+      mockChildProfileRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.registerChild(adminUser, {
+        firstname: 'Tobi',
+        lastname: 'Ade',
+        ageRange: '4-5',
+      });
+
+      expect(mockChildProfileRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dateOfBirth: null,
+          ageRange: '4-5',
+          ageRangeSetOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      );
+      expect(mockAgeGroupRepo.findOne).toHaveBeenCalled();
+    });
+
+    it('keeps only the date of birth when both are sent', async () => {
+      mockChildProfileRepo.create.mockImplementation((v) => v);
+      mockChildProfileRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.registerChild(adminUser, {
+        firstname: 'Tobi',
+        lastname: 'Ade',
+        dateOfBirth: '2021-03-01',
+        ageRange: '4-5',
+      });
+
+      expect(mockChildProfileRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dateOfBirth: '2021-03-01',
+          ageRange: null,
+          ageRangeSetOn: null,
+        }),
+      );
+    });
+
+    it('refuses a child with neither a date of birth nor an age range', async () => {
+      await expect(
+        service.registerChild(adminUser, { firstname: 'A', lastname: 'B' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ─── updateChild (age) ────────────────────────────────────────────────────
+
+  describe('updateChild age', () => {
+    it('switching to an age range clears the date of birth', async () => {
+      mockChildProfileRepo.findOne.mockResolvedValue({ ...mockChild });
+      mockAgeGroupRepo.findOne.mockResolvedValue(mockAgeGroup);
+      mockClassGroupRepo.find.mockResolvedValue([]);
+      mockChildProfileRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.updateChild(adminUser, 'child-1', {
+        ageRange: '6-8',
+      });
+
+      expect(result.dateOfBirth).toBeNull();
+      expect(result.ageRange).toBe('6-8');
+    });
   });
 
   // ─── getChild ─────────────────────────────────────────────────────────────
@@ -553,6 +658,38 @@ describe('ChildrenChurchService', () => {
       );
       expect(result.pickupCode).toBe('ABC123');
     });
+
+    const checkInWithSlot = async (endTime: Date) => {
+      mockChildProfileRepo.findOne.mockResolvedValue(mockChild);
+      mockCheckInRepo.findOne.mockResolvedValue(null);
+      mockCheckInRepo.existsBy.mockResolvedValue(false);
+      mockCheckInRepo.create.mockImplementation((v) => v);
+      mockCheckInRepo.save.mockImplementation((v) => Promise.resolve(v));
+      mockSlotRepo.findOne.mockResolvedValue({ id: 'slot-1', endTime });
+      await service.checkIn(adminUser, {
+        childId: 'child-1',
+        serviceSlotId: 'slot-1',
+      });
+      await new Promise((r) => setImmediate(r));
+    };
+
+    it('schedules one late-pickup check for the slot, 20 minutes after it ends', async () => {
+      const end = new Date(Date.now() + 60 * 60_000);
+      await checkInWithSlot(end);
+      expect(mockLateQueue.add).toHaveBeenCalledWith(
+        'late-pickup',
+        expect.objectContaining({ slotId: 'slot-1' }),
+        expect.objectContaining({ jobId: 'cc-late:t1:slot-1' }),
+      );
+      const delay = mockLateQueue.add.mock.calls[0][2].delay;
+      expect(delay).toBeGreaterThan(79 * 60_000);
+      expect(delay).toBeLessThanOrEqual(80 * 60_000);
+    });
+
+    it('skips the late-pickup check when the slot ended long ago', async () => {
+      await checkInWithSlot(new Date(Date.now() - 2 * 60 * 60_000));
+      expect(mockLateQueue.add).not.toHaveBeenCalled();
+    });
   });
 
   // ─── verifyPickupCode ─────────────────────────────────────────────────────
@@ -616,6 +753,7 @@ describe('ChildrenChurchService', () => {
       expect(result.status).toBe(ChildCheckInStatusEnum.CHECKED_OUT);
       expect(result.checkoutTime).not.toBeNull();
       expect(result.pickedUpByName).toBe('Dad');
+      expect(result.checkedOutBy).toEqual({ id: 'admin-1' });
     });
 
     it('should send pickup email to all guardians with an email address', async () => {
@@ -830,6 +968,168 @@ describe('ChildrenChurchService', () => {
 
       expect(result.updated).toBeGreaterThanOrEqual(1);
       expect(mockChildProfileRepo.save).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('guardians linked to member accounts', () => {
+    it('registers a child with several guardians in one transaction, skipping a repeated member', async () => {
+      mockAgeGroupRepo.findOne.mockResolvedValue(null);
+      mockChildProfileRepo.create.mockImplementation((v) => v);
+      mockChildProfileRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'child-9', ...v }),
+      );
+      mockGuardianRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const child = await service.registerChild(adminUser, {
+        firstname: 'Tobi',
+        lastname: 'Ade',
+        ageRange: '4-5',
+        guardians: [
+          {
+            fullName: 'Ada Ade',
+            relationship: 'MOTHER' as any,
+            memberId: 'm-1',
+          },
+          {
+            fullName: 'Femi Ade',
+            relationship: 'FATHER' as any,
+            memberId: 'm-2',
+          },
+          {
+            fullName: 'Ada Ade',
+            relationship: 'MOTHER' as any,
+            memberId: 'm-1',
+          },
+          {
+            fullName: 'Aunty Bisi',
+            relationship: 'AUNT' as any,
+            phoneNumber: '+2348000000000',
+          },
+        ],
+      });
+
+      expect(mockChildProfileRepo.manager.transaction).toHaveBeenCalledTimes(1);
+      const saved = mockGuardianRepo.save.mock.calls[0][0];
+      expect(saved).toHaveLength(3);
+      expect(saved.map((g: any) => g.member?.id ?? null)).toEqual([
+        'm-1',
+        'm-2',
+        null,
+      ]);
+      expect(child.guardians).toHaveLength(3);
+    });
+
+    it('refuses to add the same member twice to one child', async () => {
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
+        undefined,
+      );
+      mockChildProfileRepo.findOne.mockResolvedValue(mockChild);
+      mockGuardianRepo.exists.mockResolvedValue(true);
+      await expect(
+        service.addGuardian(adminUser, 'child-1', {
+          fullName: 'Ada Ade',
+          relationship: 'MOTHER' as any,
+          memberId: 'm-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockGuardianRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("lists the signed-in member's children in one query, by the guardian link", async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockChild]),
+      };
+      mockChildProfileRepo.createQueryBuilder.mockReturnValue(qb);
+      const statusQb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([
+            { childId: 'child-1', inClassNow: true, lastVisit: '2026-11-15' },
+          ]),
+      };
+      mockCheckInRepo.createQueryBuilder.mockReturnValue(statusQb);
+
+      const result = await service.getMyChildren({ id: 'parent-1' } as any);
+
+      expect(qb.innerJoin).toHaveBeenCalledWith(
+        'child.guardians',
+        'mine',
+        'mine.member_id = :me',
+        { me: 'parent-1' },
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith([
+        'g.id',
+        'g.fullName',
+        'g.relationship',
+        'g.isAuthorizedPickup',
+      ]);
+      expect(result).toEqual([
+        { ...mockChild, inClassNow: true, lastVisit: '2026-11-15' },
+      ]);
+      expect(statusQb.setParameter).toHaveBeenCalledWith(
+        'status',
+        ChildCheckInStatusEnum.CHECKED_IN,
+      );
+      expect(
+        mockDepartmentAccessService.assertHasCapability,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("hides a child's history from anyone who isn't their guardian", async () => {
+      mockGuardianRepo.exists.mockResolvedValue(false);
+      await expect(
+        service.getMyChildCheckInHistory({ id: 'stranger' } as any, 'child-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockCheckInRepo.findAndCount).not.toHaveBeenCalled();
+    });
+
+    it("shows a guardian their child's check-ins with only the teachers' names", async () => {
+      mockGuardianRepo.exists.mockResolvedValue(true);
+      const qb = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'ci-1' }], 1]),
+      };
+      mockCheckInRepo.createQueryBuilder.mockReturnValue(qb);
+      const res = await service.getMyChildCheckInHistory(
+        { id: 'parent-1' } as any,
+        'child-1',
+      );
+      expect(qb.addSelect).toHaveBeenCalledWith([
+        'tin.id',
+        'tin.firstname',
+        'tin.lastname',
+      ]);
+      expect(qb.addSelect).toHaveBeenCalledWith([
+        'tout.id',
+        'tout.firstname',
+        'tout.lastname',
+      ]);
+      expect(res.totalCount).toBe(1);
+    });
+
+    it("only lets the Children's Church team search members", async () => {
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
+        new ForbiddenException('no'),
+      );
+      await expect(
+        service.searchMembersForGuardian(adminUser, 'ada'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockMemberService.searchActiveMembersLite).not.toHaveBeenCalled();
     });
   });
 });

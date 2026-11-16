@@ -18643,7 +18643,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ageGroupId\": \"{{ageGroupId}}\",\n  \"name\": \"Nursery Room A\",\n  \"capacity\": 20,\n  \"teacherNote\": \"Needs extra supervision\"\n}",
+              "raw": "{\n  \"ageGroupId\": \"{{ageGroupId}}\",\n  \"name\": \"Nursery Room A\",\n  \"capacity\": 20,\n  \"teacherNote\": \"Needs extra supervision\",\n  \"childrenPerTeacher\": 6\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18695,7 +18695,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Nursery Room A (Expanded)\",\n  \"capacity\": 25\n}",
+              "raw": "{\n  \"name\": \"Nursery Room A (Expanded)\",\n  \"capacity\": 25,\n  \"childrenPerTeacher\": 6\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18864,7 +18864,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/children-church/admin/checkin/history?page=1&limit=20&classGroupId={{classGroupId}}&status=&slotId=",
+              "raw": "{{baseUrl}}/children-church/admin/checkin/history?page=1&limit=20&classGroupId={{classGroupId}}&status=&slotId=&teacherId=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -18896,6 +18896,12 @@
                 {
                   "key": "slotId",
                   "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "teacherId",
+                  "value": "",
+                  "description": "Matches who checked in or out",
                   "disabled": true
                 }
               ]
@@ -18954,6 +18960,229 @@
               "body": "[\n  { \"id\": \"uuid\", \"pickupCode\": \"ABC123\", \"status\": \"CHECKED_OUT\", \"child\": { \"firstname\": \"Emma\", \"lastname\": \"Johnson\" }, \"checkinTime\": \"...\", \"checkoutTime\": \"...\" }\n]"
             }
           ]
+        },
+        {
+          "name": "List Children",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/children?page=1&limit=20&search=&classGroupId=&link=unlinked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "children"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "classGroupId",
+                  "value": ""
+                },
+                {
+                  "key": "link",
+                  "value": "unlinked"
+                }
+              ]
+            },
+            "description": "children_church:read. link = linked | unlinked."
+          },
+          "response": []
+        },
+        {
+          "name": "Child Detail (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/children/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "children",
+                "{{childId}}"
+              ]
+            },
+            "description": "children_church:read."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Guardian (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/children/{{childId}}/guardians",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "children",
+                "{{childId}}",
+                "guardians"
+              ]
+            },
+            "description": "children_church:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Kemi Bello\",\n  \"relationship\": \"MOTHER\",\n  \"memberId\": \"{{memberId}}\",\n  \"isAuthorizedPickup\": true\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Link Guardian (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/guardians/{{guardianId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "guardians",
+                "{{guardianId}}"
+              ]
+            },
+            "description": "children_church:write. memberId null unlinks.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Guardian (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/guardians/{{guardianId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "guardians",
+                "{{guardianId}}"
+              ]
+            },
+            "description": "children_church:write."
+          },
+          "response": []
+        },
+        {
+          "name": "Edit Notes (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/children/{{childId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "children",
+                "{{childId}}",
+                "notes"
+              ]
+            },
+            "description": "children_church:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"specialNotes\": \"Allergic to peanuts\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Members (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/members/search?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "members",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "children_church:write. Up to 10 active members."
+          },
+          "response": []
+        },
+        {
+          "name": "Teachers (history filter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/admin/teachers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "admin",
+                "teachers"
+              ]
+            },
+            "description": "children_church:read. Everyone who checked a child in or out in the last 90 days."
+          },
+          "response": []
         }
       ]
     },
@@ -18972,7 +19201,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"Emma\",\n  \"lastname\": \"Johnson\",\n  \"dateOfBirth\": \"2023-03-15\",\n  \"photoUrl\": null,\n  \"specialNotes\": \"Allergic to nuts\",\n  \"registeredByMemberId\": \"{{memberId}}\"\n}",
+              "raw": "{\n  \"firstname\": \"Emma\",\n  \"lastname\": \"Johnson\",\n  \"dateOfBirth\": \"2023-03-15\",\n  \"photoUrl\": null,\n  \"specialNotes\": \"Allergic to nuts\",\n  \"registeredByMemberId\": \"{{memberId}}\",\n  \"guardians\": [\n    {\n      \"fullName\": \"Grace Johnson\",\n      \"relationship\": \"MOTHER\",\n      \"memberId\": \"{{memberId}}\",\n      \"isAuthorizedPickup\": true\n    },\n    {\n      \"fullName\": \"Femi Johnson\",\n      \"relationship\": \"FATHER\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"isAuthorizedPickup\": true\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18989,7 +19218,7 @@
                 "children"
               ]
             },
-            "description": "ADMIN or CC-dept worker. ageGroup and classGroup are automatically assigned from dateOfBirth. photoUrl, specialNotes, and registeredByMemberId are optional."
+            "description": "ADMIN or CC-dept worker. Send either dateOfBirth (YYYY-MM-DD) or ageRange (0-3, 4-5, 6-8, 9-12, 13-15, 16-19); if both are sent, dateOfBirth is kept. ageGroup and classGroup are assigned automatically from whichever is given. photoUrl, specialNotes and registeredByMemberId are optional. Optional guardians[] (max 6) are saved with the child in one transaction; a guardian with memberId sees the child in My Children."
           },
           "response": [
             {
@@ -18999,6 +19228,180 @@
               "body": "{\n  \"id\": \"f9a0b1c2-d3e4-5f6a-7b8c-9d0e1f2a3b4c\",\n  \"firstname\": \"Emma\",\n  \"lastname\": \"Johnson\",\n  \"dateOfBirth\": \"2023-03-15\",\n  \"specialNotes\": \"Allergic to nuts\",\n  \"photoUrl\": null,\n  \"ageGroup\": { \"id\": \"d7e8f9a0-b1c2-3d4e-5f6a-7b8c9d0e1f2a\", \"name\": \"Toddlers\" },\n  \"classGroup\": { \"id\": \"e8f9a0b1-c2d3-4e5f-6a7b-8c9d0e1f2a3b\", \"name\": \"Toddlers Room B\" },\n  \"guardians\": [],\n  \"createdAt\": \"2026-06-17T08:00:00.000Z\"\n}"
             }
           ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('childId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Child (age range)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"Tobi\",\n  \"lastname\": \"Ade\",\n  \"ageRange\": \"4-5\",\n  \"specialNotes\": \"\",\n  \"registeredByMemberId\": \"{{memberId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children"
+              ]
+            },
+            "description": "ADMIN or CC-dept worker. Send either dateOfBirth (YYYY-MM-DD) or ageRange (0-3, 4-5, 6-8, 9-12, 13-15, 16-19); if both are sent, dateOfBirth is kept. ageGroup and classGroup are assigned automatically from whichever is given. photoUrl, specialNotes and registeredByMemberId are optional."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('childId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "My Children (guardian)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine"
+              ]
+            },
+            "description": "Any signed-in member. Children whose guardian is linked to the caller's member account. Guardians come back with id, fullName, relationship and isAuthorizedPickup only."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('childId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "My Child Check-In History (guardian)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/checkin-history?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "checkin-history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Any signed-in member who is a guardian of the child; 404 otherwise. limit is capped at 50."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('childId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search Members (link guardian)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/members/search?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "members",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "CC-dept worker. Up to 10 active members matching the name, to link as a guardian."
+          },
+          "response": [],
           "event": [
             {
               "listen": "test",
@@ -19048,7 +19451,7 @@
                 }
               ]
             },
-            "description": "ADMIN or CC-dept worker. All fields optional."
+            "description": "ADMIN or CC-dept worker. All fields optional. Sending dateOfBirth clears ageRange, and sending ageRange clears dateOfBirth; either one re-assigns the age and class group."
           },
           "response": [
             {
@@ -19560,6 +19963,325 @@
               "body": "[\n  { \"id\": \"uuid\", \"pickupCode\": \"ABC123\", \"status\": \"CHECKED_IN\", \"child\": { \"id\": \"uuid\", \"firstname\": \"Emma\", \"lastname\": \"Johnson\", \"classGroup\": { \"name\": \"Nursery Room A\" } }, \"checkinTime\": \"2026-06-15T09:00:00.000Z\" }\n]"
             }
           ]
+        },
+        {
+          "name": "My Child (parent view)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}"
+              ]
+            },
+            "description": "Guardian of the child. Child, guardians (no contact details), today's visit with teacher names and pickup code (only for a guardian who can collect, while checked in), today's shared notes (opening marks them seen), today's away message."
+          },
+          "response": []
+        },
+        {
+          "name": "Edit My Child",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}"
+              ]
+            },
+            "description": "Guardian of the child. Changing special notes records who changed them.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dateOfBirth\": \"2021-08-14\",\n  \"specialNotes\": [\n    \"Allergic to peanuts\",\n    \"Uses an inhaler, kept in his bag\"\n  ],\n  \"emergencyContactName\": \"Kemi Adebayo\",\n  \"emergencyContactRelationship\": \"Grandmother\",\n  \"emergencyContactPhone\": \"+2348030001122\",\n  \"doctorName\": \"City Clinic\",\n  \"doctorPhone\": \"+2348030003344\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload My Child Photo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "photo"
+              ]
+            },
+            "description": "Guardian of the child. Multipart field file, image, max 5 MB.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set Away Message (today)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/away",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "away"
+              ]
+            },
+            "description": "Guardian of the child. The collector must be a guardian who can collect. Counts only today (church time).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collectorGuardianId\": \"{{guardianId}}\",\n  \"message\": \"Femi will collect after second service.\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Clear Away Message",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/away",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "away"
+              ]
+            },
+            "description": "Guardian of the child."
+          },
+          "response": []
+        },
+        {
+          "name": "Reply to Teachers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "notes"
+              ]
+            },
+            "description": "Guardian of the child. Needs a check-in today. Notifies the teachers on that visit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Thank you for checking!\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Check-In Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/checkin/{{checkinId}}/detail",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "checkin",
+                "{{checkinId}}",
+                "detail"
+              ]
+            },
+            "description": "CC-dept worker. Visit, family contacts, guardians, away message and notes."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Check-In Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/checkin/{{checkinId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "checkin",
+                "{{checkinId}}",
+                "notes"
+              ]
+            },
+            "description": "CC-dept worker. TEAM_ONLY is never shared; other kinds are shared unless shareWithParents is false. Sharing notifies guardians on the app.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"FEEDBACK\",\n  \"text\": \"Said the memory verse all by himself.\",\n  \"shareWithParents\": true\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Link Guardian to Member",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/guardians/{{guardianId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "guardians",
+                "{{guardianId}}"
+              ]
+            },
+            "description": "CC-dept worker. memberId null unlinks.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Am I a Lead?",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/lead",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "lead"
+              ]
+            },
+            "description": "Any member. { isLead } for the HOD / deputy of the Children's Church department."
+          },
+          "response": []
+        },
+        {
+          "name": "HOD Dashboard (today)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/dashboard/today",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "dashboard",
+                "today"
+              ]
+            },
+            "description": "HOD / deputy HOD only. Cached 60 seconds."
+          },
+          "response": []
+        },
+        {
+          "name": "Roster (with parents)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/roster?search=&link=unlinked&page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "roster"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "link",
+                  "value": "unlinked"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "CC-dept worker. Children with parents and link status, 20 per page, plus counts (total, linked, unlinked)."
+          },
+          "response": []
         }
       ]
     },

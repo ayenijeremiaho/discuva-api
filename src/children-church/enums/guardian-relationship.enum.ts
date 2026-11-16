@@ -1,4 +1,6 @@
 export enum GuardianRelationshipEnum {
+  PARENT = 'PARENT',
+  GUARDIAN = 'GUARDIAN',
   FATHER = 'FATHER',
   MOTHER = 'MOTHER',
   GRANDPARENT = 'GRANDPARENT',
@@ -13,6 +15,8 @@ export const GuardianRelationshipLabels: Record<
   GuardianRelationshipEnum,
   string
 > = {
+  [GuardianRelationshipEnum.PARENT]: 'Parent',
+  [GuardianRelationshipEnum.GUARDIAN]: 'Guardian',
   [GuardianRelationshipEnum.FATHER]: 'Father',
   [GuardianRelationshipEnum.MOTHER]: 'Mother',
   [GuardianRelationshipEnum.GRANDPARENT]: 'Grandparent',

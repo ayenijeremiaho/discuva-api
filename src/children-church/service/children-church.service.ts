@@ -37,6 +37,18 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { randomBytes } from 'node:crypto';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { childAgeInMonths } from '../child-age.util';
+import { MemberService } from '../../member/service/member.service';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
+import { ServiceSlot } from '../../event/entity/service-slot.entity';
+import {
+  CHILDREN_LATE_QUEUE,
+  LATE_PICKUP_MINUTES,
+} from '../children-church.constants';
 
 const PICKUP_CODE_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PICKUP_CODE_LENGTH = 6;
@@ -59,6 +71,11 @@ export class ChildrenChurchService {
     private readonly utilityService: UtilityService,
     private readonly departmentAccessService: DepartmentAccessService,
     private readonly churchTimezone: ChurchTimezoneService,
+    private readonly memberService: MemberService,
+    @InjectRepository(ServiceSlot)
+    private readonly slotRepo: Repository<ServiceSlot>,
+    @InjectQueue(CHILDREN_LATE_QUEUE) private readonly lateQueue: Queue,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   // ─── Age Groups ───────────────────────────────────────────────────────────
@@ -142,6 +159,7 @@ export class ChildrenChurchService {
       name: dto.name,
       capacity: dto.capacity ?? null,
       teacherNote: dto.teacherNote ?? null,
+      childrenPerTeacher: dto.childrenPerTeacher ?? null,
     });
     return this.classGroupRepo.save(entity);
   }
@@ -160,6 +178,8 @@ export class ChildrenChurchService {
     if (dto.capacity !== undefined) entity.capacity = dto.capacity ?? null;
     if (dto.teacherNote !== undefined)
       entity.teacherNote = dto.teacherNote ?? null;
+    if (dto.childrenPerTeacher !== undefined)
+      entity.childrenPerTeacher = dto.childrenPerTeacher ?? null;
     return this.classGroupRepo.save(entity);
   }
 
@@ -197,22 +217,33 @@ export class ChildrenChurchService {
   ): Promise<ChildProfile> {
     await this.requireChildrenChurchAuth(user);
     this.logger.log(`Registering child: ${dto.firstname} ${dto.lastname}`);
-    const { ageGroup, classGroup } = await this.computeAgeGroup(
-      dto.dateOfBirth,
-    );
-    const entity = this.childProfileRepo.create({
-      firstname: dto.firstname,
-      lastname: dto.lastname,
-      dateOfBirth: dto.dateOfBirth,
-      photoUrl: dto.photoUrl ?? null,
-      specialNotes: dto.specialNotes ?? null,
-      ageGroup,
-      classGroup,
-      registeredBy: dto.registeredByMemberId
-        ? ({ id: dto.registeredByMemberId } as Member)
-        : null,
+    const age = this.ageFields(dto);
+    const guardians = this.uniqueGuardians(dto.guardians ?? []);
+    const { ageGroup, classGroup } = await this.computeAgeGroup(age);
+    return this.childProfileRepo.manager.transaction(async (m) => {
+      const child = await m.save(
+        ChildProfile,
+        this.childProfileRepo.create({
+          firstname: dto.firstname,
+          lastname: dto.lastname,
+          ...age,
+          photoUrl: dto.photoUrl ?? null,
+          specialNotes: dto.specialNotes ?? null,
+          ageGroup,
+          classGroup,
+          registeredBy: dto.registeredByMemberId
+            ? ({ id: dto.registeredByMemberId } as Member)
+            : null,
+        }),
+      );
+      if (guardians.length) {
+        child.guardians = await m.save(
+          ChildGuardian,
+          guardians.map((g) => this.guardianEntity(child, g)),
+        );
+      }
+      return child;
     });
-    return this.childProfileRepo.save(entity);
   }
 
   async updateChild(
@@ -232,11 +263,9 @@ export class ChildrenChurchService {
     if (dto.photoUrl !== undefined) entity.photoUrl = dto.photoUrl ?? null;
     if (dto.specialNotes !== undefined)
       entity.specialNotes = dto.specialNotes ?? null;
-    if (dto.dateOfBirth !== undefined) {
-      entity.dateOfBirth = dto.dateOfBirth;
-      const { ageGroup, classGroup } = await this.computeAgeGroup(
-        dto.dateOfBirth,
-      );
+    if (dto.dateOfBirth !== undefined || dto.ageRange !== undefined) {
+      Object.assign(entity, this.ageFields(dto));
+      const { ageGroup, classGroup } = await this.computeAgeGroup(entity);
       entity.ageGroup = ageGroup;
       entity.classGroup = classGroup;
     }
@@ -273,7 +302,7 @@ export class ChildrenChurchService {
 
     if (name) {
       qb.where(
-        "CONCAT(child.firstname, ' ', child.lastname) ILIKE :name OR child.firstname ILIKE :name OR child.lastname ILIKE :name",
+        "(CONCAT(child.firstname, ' ', child.lastname) ILIKE :name OR child.firstname ILIKE :name OR child.lastname ILIKE :name)",
         { name: `%${name}%` },
       );
     }
@@ -340,13 +369,16 @@ export class ChildrenChurchService {
     const toUpdate: ChildProfile[] = [];
 
     for (const child of children) {
-      const ageInMonths = this.computeAgeInMonths(child.dateOfBirth);
+      const ageInMonths = childAgeInMonths(child);
 
       const ageGroup =
-        ageGroups.find(
-          (ag) =>
-            ag.minAgeMonths <= ageInMonths && ag.maxAgeMonths >= ageInMonths,
-        ) ?? null;
+        ageInMonths === null
+          ? null
+          : (ageGroups.find(
+              (ag) =>
+                ag.minAgeMonths <= ageInMonths &&
+                ag.maxAgeMonths >= ageInMonths,
+            ) ?? null);
 
       let classGroup: ChildClassGroup | null = null;
       if (ageGroup) {
@@ -403,17 +435,115 @@ export class ChildrenChurchService {
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
-    const entity = this.guardianRepo.create({
-      child,
-      fullName: dto.fullName,
-      phoneNumber: dto.phoneNumber ?? null,
-      email: dto.email ?? null,
-      relationship: dto.relationship,
-      photoUrl: dto.photoUrl ?? null,
-      isAuthorizedPickup: dto.isAuthorizedPickup ?? true,
-      member: dto.memberId ? ({ id: dto.memberId } as Member) : null,
+    if (dto.memberId) {
+      const already = await this.guardianRepo.exists({
+        where: { child: { id: childId }, member: { id: dto.memberId } },
+      });
+      if (already) {
+        throw new BadRequestException(
+          'This member is already a guardian of this child',
+        );
+      }
+    }
+    return this.guardianRepo.save(this.guardianEntity(child, dto));
+  }
+
+  // Children the signed-in member is a guardian of. Other guardians' contact details are left out.
+  async getMyChildren(user: MemberAuth) {
+    const children = await this.childProfileRepo
+      .createQueryBuilder('child')
+      .innerJoin('child.guardians', 'mine', 'mine.member_id = :me', {
+        me: user.id,
+      })
+      .leftJoinAndSelect('child.ageGroup', 'ageGroup')
+      .leftJoinAndSelect('child.classGroup', 'classGroup')
+      .leftJoin('child.guardians', 'g')
+      .addSelect([
+        'g.id',
+        'g.fullName',
+        'g.relationship',
+        'g.isAuthorizedPickup',
+      ])
+      .orderBy('child.firstname', 'ASC')
+      .getMany();
+    if (!children.length) return [];
+    const status = await this.checkInRepo
+      .createQueryBuilder('ci')
+      .select('ci.child_id', 'childId')
+      .addSelect('MAX(ci.checkin_time)', 'lastVisit')
+      .addSelect(`BOOL_OR(ci.status = :status)`, 'inClassNow')
+      .where('ci.child_id IN (:...ids)', { ids: children.map((c) => c.id) })
+      .setParameter('status', ChildCheckInStatusEnum.CHECKED_IN)
+      .groupBy('ci.child_id')
+      .getRawMany<{ childId: string; lastVisit: Date; inClassNow: boolean }>();
+    const byChild = new Map(status.map((r) => [r.childId, r]));
+    return children.map((c) => ({
+      ...c,
+      inClassNow: !!byChild.get(c.id)?.inClassNow,
+      lastVisit: byChild.get(c.id)?.lastVisit ?? null,
+    }));
+  }
+
+  async getMyChildCheckInHistory(
+    user: MemberAuth,
+    childId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<PaginationResponseDto<ChildCheckIn>> {
+    const isGuardian = await this.guardianRepo.exists({
+      where: { child: { id: childId }, member: { id: user.id } },
     });
-    return this.guardianRepo.save(entity);
+    if (!isGuardian) throw new NotFoundException('Child not found');
+    const [data, totalCount] = await this.checkInRepo
+      .createQueryBuilder('ci')
+      .leftJoin('ci.serviceSlot', 'slot')
+      .addSelect(['slot.id', 'slot.name'])
+      .leftJoin('ci.checkedInBy', 'tin')
+      .addSelect(['tin.id', 'tin.firstname', 'tin.lastname'])
+      .leftJoin('ci.checkedOutBy', 'tout')
+      .addSelect(['tout.id', 'tout.firstname', 'tout.lastname'])
+      .where('ci.child_id = :childId', { childId })
+      .orderBy('ci.checkinTime', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+    return {
+      data,
+      page,
+      limit,
+      totalCount,
+      totalPages: Math.ceil(totalCount / limit),
+    };
+  }
+
+  async searchMembersForGuardian(user: MemberAuth, q: string) {
+    await this.requireChildrenChurchAuth(user);
+    return this.memberService.searchActiveMembersLite(q);
+  }
+
+  async linkGuardian(
+    user: MemberAuth,
+    guardianId: string,
+    memberId: string | null,
+  ): Promise<ChildGuardian> {
+    await this.requireChildrenChurchAuth(user);
+    const guardian = await this.guardianRepo.findOne({
+      where: { id: guardianId },
+      relations: ['child'],
+    });
+    if (!guardian) throw new NotFoundException('Guardian not found');
+    if (memberId) {
+      const taken = await this.guardianRepo.exists({
+        where: { child: { id: guardian.child.id }, member: { id: memberId } },
+      });
+      if (taken) {
+        throw new BadRequestException(
+          'This member is already a guardian of this child',
+        );
+      }
+    }
+    guardian.member = memberId ? ({ id: memberId } as Member) : null;
+    return this.guardianRepo.save(guardian);
   }
 
   async removeGuardian(user: MemberAuth, guardianId: string): Promise<void> {
@@ -481,7 +611,37 @@ export class ChildrenChurchService {
       pickupCode,
       status: ChildCheckInStatusEnum.CHECKED_IN,
     });
-    return this.checkInRepo.save(entity);
+    const saved = await this.checkInRepo.save(entity);
+    if (dto.serviceSlotId) {
+      this.scheduleLatePickup(dto.serviceSlotId).catch((err) =>
+        this.logger.error(`Late pickup job not scheduled: ${err.message}`),
+      );
+    }
+    return saved;
+  }
+
+  // One delayed job per service slot; the fixed jobId means later check-ins don't add more.
+  private async scheduleLatePickup(slotId: string): Promise<void> {
+    const slot = await this.slotRepo.findOne({
+      where: { id: slotId },
+      select: { id: true, endTime: true },
+    });
+    if (!slot?.endTime) return;
+    const runAt =
+      new Date(slot.endTime).getTime() + LATE_PICKUP_MINUTES * 60_000;
+    const delay = runAt - Date.now();
+    if (delay <= 0) return;
+    const envelope = buildJobEnvelope(this.cls);
+    await this.lateQueue.add(
+      'late-pickup',
+      { slotId, ...envelope },
+      {
+        jobId: `cc-late:${envelope.tenantId}:${slotId}`,
+        delay,
+        attempts: 2,
+        removeOnComplete: true,
+      },
+    );
   }
 
   async verifyPickupCode(
@@ -534,6 +694,7 @@ export class ChildrenChurchService {
       ? ({ id: dto.pickedUpByGuardianId } as ChildGuardian)
       : null;
     checkIn.pickedUpByName = dto.pickedUpByName ?? null;
+    checkIn.checkedOutBy = { id: user.id } as Member;
 
     const saved = await this.checkInRepo.save(checkIn);
 
@@ -627,7 +788,13 @@ export class ChildrenChurchService {
     if (!child) throw new NotFoundException('Child not found');
     const [data, totalCount] = await this.checkInRepo.findAndCount({
       where: { child: { id: childId } },
-      relations: ['serviceSlot', 'droppedOffBy', 'pickedUpBy', 'checkedInBy'],
+      relations: [
+        'serviceSlot',
+        'droppedOffBy',
+        'pickedUpBy',
+        'checkedInBy',
+        'checkedOutBy',
+      ],
       order: { checkinTime: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -666,12 +833,19 @@ export class ChildrenChurchService {
     classGroupId?: string,
     status?: ChildCheckInStatusEnum,
     slotId?: string,
+    teacherId?: string,
   ): Promise<PaginationResponseDto<ChildCheckIn>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
-    const where: any = {};
-    if (status) where.status = status;
-    if (classGroupId) where.child = { classGroup: { id: classGroupId } };
-    if (slotId) where.serviceSlot = { id: slotId };
+    const base: any = {};
+    if (status) base.status = status;
+    if (classGroupId) base.child = { classGroup: { id: classGroupId } };
+    if (slotId) base.serviceSlot = { id: slotId };
+    const where = teacherId
+      ? [
+          { ...base, checkedInBy: { id: teacherId } },
+          { ...base, checkedOutBy: { id: teacherId } },
+        ]
+      : base;
     const [data, totalCount] = await this.checkInRepo.findAndCount({
       where,
       relations: [
@@ -681,6 +855,7 @@ export class ChildrenChurchService {
         'droppedOffBy',
         'pickedUpBy',
         'checkedInBy',
+        'checkedOutBy',
         'serviceSlot',
       ],
       order: { checkinTime: 'DESC' },
@@ -707,20 +882,59 @@ export class ChildrenChurchService {
 
   // ─── Private Helpers ──────────────────────────────────────────────────────
 
-  private computeAgeInMonths(dateOfBirth: string): number {
-    const dob = new Date(dateOfBirth);
-    const today = new Date();
-    let months = (today.getFullYear() - dob.getFullYear()) * 12;
-    months += today.getMonth() - dob.getMonth();
-    if (today.getDate() < dob.getDate()) months--;
-    return months;
+  guardianEntity(child: ChildProfile, dto: CreateGuardianDto): ChildGuardian {
+    return this.guardianRepo.create({
+      child,
+      fullName: dto.fullName,
+      phoneNumber: dto.phoneNumber ?? null,
+      email: dto.email ?? null,
+      relationship: dto.relationship,
+      photoUrl: dto.photoUrl ?? null,
+      isAuthorizedPickup: dto.isAuthorizedPickup ?? true,
+      member: dto.memberId ? ({ id: dto.memberId } as Member) : null,
+    });
   }
 
-  private async computeAgeGroup(dateOfBirth: string): Promise<{
+  private uniqueGuardians(list: CreateGuardianDto[]): CreateGuardianDto[] {
+    const seen = new Set<string>();
+    return list.filter((g) => {
+      if (!g.memberId) return true;
+      if (seen.has(g.memberId)) return false;
+      seen.add(g.memberId);
+      return true;
+    });
+  }
+
+  // Exactly one of date of birth or age range is kept; a date of birth wins if both are sent.
+  ageFields(dto: {
+    dateOfBirth?: string;
+    ageRange?: string;
+  }): Pick<ChildProfile, 'dateOfBirth' | 'ageRange' | 'ageRangeSetOn'> {
+    if (dto.dateOfBirth) {
+      return {
+        dateOfBirth: dto.dateOfBirth,
+        ageRange: null,
+        ageRangeSetOn: null,
+      };
+    }
+    if (dto.ageRange) {
+      return {
+        dateOfBirth: null,
+        ageRange: dto.ageRange,
+        ageRangeSetOn: new Date().toISOString().slice(0, 10),
+      };
+    }
+    throw new BadRequestException('Give a date of birth or an age range');
+  }
+
+  async computeAgeGroup(
+    child: Pick<ChildProfile, 'dateOfBirth' | 'ageRange' | 'ageRangeSetOn'>,
+  ): Promise<{
     ageGroup: ChildAgeGroup | null;
     classGroup: ChildClassGroup | null;
   }> {
-    const ageInMonths = this.computeAgeInMonths(dateOfBirth);
+    const ageInMonths = childAgeInMonths(child);
+    if (ageInMonths === null) return { ageGroup: null, classGroup: null };
 
     const ageGroup = await this.ageGroupRepo.findOne({
       where: {

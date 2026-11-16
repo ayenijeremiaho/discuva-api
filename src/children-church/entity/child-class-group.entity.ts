@@ -25,6 +25,9 @@ export class ChildClassGroup extends BaseEntity {
   @Column({ type: 'int', nullable: true })
   capacity: number | null;
 
+  @Column({ type: 'int', nullable: true })
+  childrenPerTeacher: number | null;
+
   @Column({ nullable: true, type: 'text' })
   teacherNote: string | null;
 }

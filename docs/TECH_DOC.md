@@ -6784,6 +6784,18 @@ Provides a security-grade check-in/check-out system for children. Key features:
 - `GET /children-church/children/:id` carries a transient `visitCount` (total `ChildCheckIn` rows for that child, not persisted — same pattern as `FirstTimer.visitCount`) so a child's own attendance history reads as a single number, not just a paginated `checkin-history` list.
 - A `ChildProfile` is **not** a `Member` or `FirstTimer` — a child has no digital-footprint timeline of their own. Instead, `MemberTimelineService.getTimeline()` carries a `childrenChurchDropOffs` count: every `ChildCheckIn` where the member is the `droppedOffBy`/`pickedUpBy` `ChildGuardian` (found via `ChildGuardian.member`), across every child they guard. This tracks the *guardian's* engagement, not the child's, and is deliberately kept separate from `visitCount` (which is the member's own visits) rather than folded into it — conflating "I visited" with "my kid was dropped off" would be misleading. `ChildGuardian`/`ChildCheckIn` are registered read-only in `MemberModule` (not by importing `ChildrenChurchModule`, which already imports `MemberModule` — that would be circular), same pattern as `SundaySchoolAttendance`/`Attendance`.
 
+**Parents, notes, late pickup and the HOD view (2026-11-16):**
+
+- **My Children** (`GET /children-church/children/mine`) lists children the caller is a guardian of, each with `inClassNow` and `lastVisit` (one extra grouped query on `child_check_ins` by `child_id`). A child can have several guardians; every one linked to a member account sees the child.
+- **Parent view** (`GET /children-church/children/mine/:id`, guardian only, else 404) returns the child, guardians (name, relationship, `isAuthorizedPickup`, `isMe` — no contact details), today's visit (church-local day; `receivedBy`/`handedBackBy` teacher names; `pickupCode` only for a guardian who can collect and only while `CHECKED_IN`), today's notes shared with parents (opening marks unseen teacher notes `parentSeenAt`/`parentSeenBy`), and today's away message.
+- Parents can edit date of birth, special notes (array, stored one per line; changes set `notesUpdatedBy`/`notesUpdatedAt` so the team sees "Updated by parent"), emergency contact and doctor (`PATCH /children-church/children/mine/:id`), upload a photo (`POST …/photo`, multipart `file`, images up to 5 MB, Cloudinary `child-photos`), set or clear today's away message naming a guardian who can collect (`PUT`/`DELETE …/away`; it counts only on `awayDate`, so it clears itself), and reply to today's notes (`POST …/notes`; needs a check-in today; pushes `CHILD_NOTE_REPLY` to the teacher who checked the child in and every teacher who wrote a note on that visit).
+- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit, family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
+- **Who handled the child**: `checkedInBy` was already saved; check-out now saves `checkedOutBy`. Both show on visits for the team, admins and parents (names only).
+- **Late pickup**: checking a child into a service slot schedules one Bull delayed job per slot (`children-church-late` queue, `jobId cc-late:<tenantId>:<slotId>`, so later check-ins add nothing) for 20 minutes after the slot's `endTime`. It marks still-checked-in visits `lateNotifiedAt` and pushes `CHILD_LATE_PICKUP` to their guardians who can collect. No scanning.
+- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (distinct `checkedInBy` today), collected, rooms (children in now, teachers who checked children into that class today, `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), late pickups, flagged visits, today's parent note changes, away messages, and this month's average Sunday, new children and children not seen for 3+ weeks (last visit 21–90 days ago). Cached in Redis for 60 s per church-day.
+- **Admin**: `GET /children-church/admin/children` (paged, max 50; `search` matches child or guardian name; `classGroupId`; `link=linked|unlinked`; returns guardians, how many are on the app, last visit, registered by, plus `counts`), `GET …/admin/children/:id` (guardians with member link, last 20 visits with teachers). With `children_church:write`: add a guardian, link or unlink a guardian's member account (`PATCH /children-church/admin/guardians/:id`), remove a guardian, edit notes, and search members (`GET …/admin/members/search?q=`). History accepts `teacherId` (matches who checked in or out).
+- The team can link a guardian to a member account too: `PATCH /children-church/guardians/:id` `{ memberId }`.
+
 **Routes prefix:** `/children-church`
 
 ---
@@ -8480,7 +8492,30 @@ checked first.
 | PATCH  | /children-church/class-groups/:id                          | AdminGuard (CHILDREN_CHURCH_WRITE)                            | Update class group                                                                                            |
 | DELETE | /children-church/class-groups/:id                          | AdminGuard (CHILDREN_CHURCH_WRITE)                            | Delete class group                                                                                            |
 | GET    | /children-church/class-groups?ageGroupId=                  | WORKER (CC-dept)                                              | List class groups (filterable by age group)                                                                   |
-| POST   | /children-church/children                                  | WORKER (CC-dept)                                              | Register child                                                                                                |
+| GET    | /children-church/children/mine | Any signed-in member | Children the caller is a guardian of, each with `inClassNow` |
+| GET    | /children-church/children/mine/:id | Guardian of that child | Parent view: child, guardians, today's visit, notes, away message |
+| PATCH  | /children-church/children/mine/:id | Guardian of that child | Edit date of birth, special notes, emergency contact, doctor |
+| POST   | /children-church/children/mine/:id/photo | Guardian of that child | Upload a photo (multipart `file`, image, max 5 MB) |
+| PUT    | /children-church/children/mine/:id/away | Guardian of that child | Today's message: who is collecting (`collectorGuardianId`), optional `message` |
+| DELETE | /children-church/children/mine/:id/away | Guardian of that child | Clear today's message |
+| POST   | /children-church/children/mine/:id/notes | Guardian of that child | Reply to today's teacher notes |
+| GET    | /children-church/roster | WORKER (CC-dept) | Paged children with parents and link status (`search`, `link=linked\|unlinked`, `page`), plus counts |
+| GET    | /children-church/checkin/:id/detail | WORKER (CC-dept) | One visit with family contacts, away message and notes |
+| POST   | /children-church/checkin/:id/notes | WORKER (CC-dept) | Add a note (`kind`, `text`, `shareWithParents`) |
+| PATCH  | /children-church/guardians/:id | WORKER (CC-dept) | Link or unlink a guardian's member account (`memberId`) |
+| GET    | /children-church/lead | Any signed-in member | `{ isLead }`: HOD or deputy of the Children's Church department |
+| GET    | /children-church/dashboard/today | HOD / deputy HOD | Today at a glance (cached 60 s) |
+| GET    | /children-church/admin/children | ADMIN `children_church:read` | Paged children list with guardians, link status, last visit, counts |
+| GET    | /children-church/admin/children/:id | ADMIN `children_church:read` | Child, guardians with member link, last 20 visits with teachers |
+| POST   | /children-church/admin/children/:id/guardians | ADMIN `children_church:write` | Add a guardian |
+| PATCH  | /children-church/admin/guardians/:id | ADMIN `children_church:write` | Link or unlink a guardian's member account |
+| DELETE | /children-church/admin/guardians/:id | ADMIN `children_church:write` | Remove a guardian |
+| PATCH  | /children-church/admin/children/:id/notes | ADMIN `children_church:write` | Edit special notes |
+| GET    | /children-church/admin/teachers | ADMIN `children_church:read` | Everyone who checked a child in or out in the last 90 days (for the history filter) |
+| GET    | /children-church/admin/members/search?q= | ADMIN `children_church:write` | Up to 10 active members by name |
+| GET    | /children-church/children/mine/:id/checkin-history         | Any signed-in member (guardian of that child)                 | That child's check-ins (max limit 50); 404 for non-guardians                                                  |
+| GET    | /children-church/members/search?q=                         | WORKER (CC-dept)                                              | Up to 10 active members by name, for linking a guardian                                                      |
+| POST   | /children-church/children                                  | WORKER (CC-dept)                                              | Register child; optional `guardians[]` saved in the same transaction                                          |
 | PATCH  | /children-church/children/:id                              | WORKER (CC-dept)                                              | Update child profile                                                                                          |
 | GET    | /children-church/children/:id                              | WORKER (CC-dept)                                              | Get child by ID                                                                                               |
 | GET    | /children-church/children/:id/checkin-history              | WORKER (CC-dept)                                              | Child check-in history (paginated)                                                                            |
@@ -10537,6 +10572,7 @@ A physical class room or group within an age group.
 | ageGroup    | ChildAgeGroup | ManyToOne, CASCADE on delete   |
 | capacity    | int \| null   | Optional room capacity         |
 | teacherNote | text \| null  | Optional notes for the teacher |
+| childrenPerTeacher | int \| null | Optional; the HOD dashboard shows "Needs a teacher" when children in the room exceed teachers × this |
 
 **Delete guard:** Deleting a class group is blocked if any child profiles are currently assigned to it. Reassign
 children before deleting.
@@ -10550,12 +10586,18 @@ The central record for a registered child.
 | id           | UUID                | PK                                       |
 | firstname    | string              |                                          |
 | lastname     | string              |                                          |
-| dateOfBirth  | string (YYYY-MM-DD) | Used for automatic age-group assignment  |
-| ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB       |
+| dateOfBirth  | string (YYYY-MM-DD) \| null | Used for automatic age-group assignment. Either this or `ageRange` is set, never both |
+| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday |
+| ageRangeSetOn | string (YYYY-MM-DD) \| null | Day the range was given. For grouping, a range child is placed at the range midpoint on that day and ages from there (`childAgeInMonths` in `child-age.util.ts`) |
+| ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB or age range |
 | classGroup   | ChildClassGroup     | ManyToOne — auto-assigned from age group |
 | photoUrl     | string \| null      | Optional                                 |
 | specialNotes | string \| null      | Allergies, medical info, etc.            |
 | registeredBy | Member \| null      | ManyToOne, nullable                      |
+| emergencyContactName / Relationship / Phone | string \| null | Kept by parents |
+| doctorName / doctorPhone | string \| null | Kept by parents |
+| notesUpdatedBy / notesUpdatedAt | Member \| null / timestamptz | Set when a parent changes special notes |
+| awayDate / awayCollector / awayMessage / awaySetBy | date / ChildGuardian / text / Member | Today's "someone else is collecting" message; only counts on `awayDate` |
 | guardians    | ChildGuardian[]     | OneToMany                                |
 
 ### ChildGuardian
@@ -10567,10 +10609,12 @@ A guardian or authorised pickup person for a child.
 | id                 | UUID                     | PK                                                                                    |
 | child              | ChildProfile             | ManyToOne                                                                             |
 | fullName           | string                   |                                                                                       |
-| relationship       | GuardianRelationshipEnum | MOTHER \| FATHER \| GRANDPARENT \| SIBLING \| UNCLE \| AUNT \| FAMILY_FRIEND \| OTHER |
+| relationship       | GuardianRelationshipEnum | PARENT \| GUARDIAN \| MOTHER \| FATHER \| GRANDPARENT \| SIBLING \| UNCLE \| AUNT \| FAMILY_FRIEND \| OTHER |
 | phoneNumber        | string                   |                                                                                       |
 | email              | string \| null           | Direct email; resolved at runtime as `guardian.email ?? guardian.member.email`        |
 | member             | Member \| null           | ManyToOne, nullable — links guardian to a church member account                       |
+
+A child can have several guardians. Each guardian linked to a member account (`member`) sees the child under **My Children** in the member app (`GET /children-church/children/mine`, one query on `idx_child_guardians_member_id`). Guardians without an account are kept for pickup only. The same member can't be added twice to one child (`addGuardian` → 400). `registerChild` accepts `guardians[]` (max 6) and saves the child and guardians in one transaction, skipping a repeated `memberId`.
 | photoUrl           | string \| null           | Optional                                                                              |
 | isAuthorizedPickup | boolean                  | Whether this guardian is allowed to pick up the child                                 |
 
@@ -10592,7 +10636,24 @@ One check-in/check-out record per child per session.
 | pickedUpBy       | ChildGuardian \| null  | ManyToOne, nullable — set on checkout                         |
 | pickedUpByName   | string \| null         | Name captured at pickup                                       |
 | checkedInBy      | Member \| null         | ManyToOne, nullable — staff member who performed the check-in |
+| checkedOutBy     | Member \| null         | ManyToOne, nullable — staff member who handed the child back  |
+| lateNotifiedAt   | timestamptz \| null    | Set when guardians were told the child is waiting (once)      |
 | flagReason       | string \| null         | Reason if status = FLAGGED                                    |
+
+### ChildCheckInNote
+
+A teacher's note on one visit, or a parent's reply. Table `child_checkin_notes`, indexed on `(check_in_id, created_at)`.
+
+| Field             | Type                     | Notes                                                              |
+|-------------------|--------------------------|--------------------------------------------------------------------|
+| checkIn           | ChildCheckIn             | ManyToOne, CASCADE                                                 |
+| author            | Member \| null           | SET NULL                                                           |
+| fromParent        | boolean                  | true for a parent's reply                                          |
+| kind              | ChildNoteKind            | FEEDBACK \| MEAL \| INCIDENT \| TEAM_ONLY \| PARENT_REPLY            |
+| text              | text                     |                                                                    |
+| sharedWithParents | boolean                  | TEAM_ONLY is always false                                          |
+| replyTo           | ChildCheckInNote \| null | A reply points at the latest shared teacher note                   |
+| parentSeenAt / parentSeenBy | timestamptz / Member | Set the first time a guardian opens the child after it was shared |
 
 ### TitheAccount
 
@@ -13254,6 +13315,7 @@ A physical class room or group within an age group.
 | ageGroup    | ChildAgeGroup | ManyToOne, CASCADE on delete   |
 | capacity    | int \| null   | Optional room capacity         |
 | teacherNote | text \| null  | Optional notes for the teacher |
+| childrenPerTeacher | int \| null | Optional; the HOD dashboard shows "Needs a teacher" when children in the room exceed teachers × this |
 
 **Delete guard:** Deleting a class group is blocked if any child profiles are currently assigned to it. Reassign
 children before deleting.
@@ -13267,12 +13329,18 @@ The central record for a registered child.
 | id           | UUID                | PK                                       |
 | firstname    | string              |                                          |
 | lastname     | string              |                                          |
-| dateOfBirth  | string (YYYY-MM-DD) | Used for automatic age-group assignment  |
-| ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB       |
+| dateOfBirth  | string (YYYY-MM-DD) \| null | Used for automatic age-group assignment. Either this or `ageRange` is set, never both |
+| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday |
+| ageRangeSetOn | string (YYYY-MM-DD) \| null | Day the range was given. For grouping, a range child is placed at the range midpoint on that day and ages from there (`childAgeInMonths` in `child-age.util.ts`) |
+| ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB or age range |
 | classGroup   | ChildClassGroup     | ManyToOne — auto-assigned from age group |
 | photoUrl     | string \| null      | Optional                                 |
 | specialNotes | string \| null      | Allergies, medical info, etc.            |
 | registeredBy | Member \| null      | ManyToOne, nullable                      |
+| emergencyContactName / Relationship / Phone | string \| null | Kept by parents |
+| doctorName / doctorPhone | string \| null | Kept by parents |
+| notesUpdatedBy / notesUpdatedAt | Member \| null / timestamptz | Set when a parent changes special notes |
+| awayDate / awayCollector / awayMessage / awaySetBy | date / ChildGuardian / text / Member | Today's "someone else is collecting" message; only counts on `awayDate` |
 | guardians    | ChildGuardian[]     | OneToMany                                |
 
 ### ChildGuardian
@@ -13284,10 +13352,12 @@ A guardian or authorised pickup person for a child.
 | id                 | UUID                     | PK                                                                                    |
 | child              | ChildProfile             | ManyToOne                                                                             |
 | fullName           | string                   |                                                                                       |
-| relationship       | GuardianRelationshipEnum | MOTHER \| FATHER \| GRANDPARENT \| SIBLING \| UNCLE \| AUNT \| FAMILY_FRIEND \| OTHER |
+| relationship       | GuardianRelationshipEnum | PARENT \| GUARDIAN \| MOTHER \| FATHER \| GRANDPARENT \| SIBLING \| UNCLE \| AUNT \| FAMILY_FRIEND \| OTHER |
 | phoneNumber        | string                   |                                                                                       |
 | email              | string \| null           | Direct email; resolved at runtime as `guardian.email ?? guardian.member.email`        |
 | member             | Member \| null           | ManyToOne, nullable — links guardian to a church member account                       |
+
+A child can have several guardians. Each guardian linked to a member account (`member`) sees the child under **My Children** in the member app (`GET /children-church/children/mine`, one query on `idx_child_guardians_member_id`). Guardians without an account are kept for pickup only. The same member can't be added twice to one child (`addGuardian` → 400). `registerChild` accepts `guardians[]` (max 6) and saves the child and guardians in one transaction, skipping a repeated `memberId`.
 | photoUrl           | string \| null           | Optional                                                                              |
 | isAuthorizedPickup | boolean                  | Whether this guardian is allowed to pick up the child                                 |
 
@@ -13309,7 +13379,24 @@ One check-in/check-out record per child per session.
 | pickedUpBy       | ChildGuardian \| null  | ManyToOne, nullable — set on checkout                         |
 | pickedUpByName   | string \| null         | Name captured at pickup                                       |
 | checkedInBy      | Member \| null         | ManyToOne, nullable — staff member who performed the check-in |
+| checkedOutBy     | Member \| null         | ManyToOne, nullable — staff member who handed the child back  |
+| lateNotifiedAt   | timestamptz \| null    | Set when guardians were told the child is waiting (once)      |
 | flagReason       | string \| null         | Reason if status = FLAGGED                                    |
+
+### ChildCheckInNote
+
+A teacher's note on one visit, or a parent's reply. Table `child_checkin_notes`, indexed on `(check_in_id, created_at)`.
+
+| Field             | Type                     | Notes                                                              |
+|-------------------|--------------------------|--------------------------------------------------------------------|
+| checkIn           | ChildCheckIn             | ManyToOne, CASCADE                                                 |
+| author            | Member \| null           | SET NULL                                                           |
+| fromParent        | boolean                  | true for a parent's reply                                          |
+| kind              | ChildNoteKind            | FEEDBACK \| MEAL \| INCIDENT \| TEAM_ONLY \| PARENT_REPLY            |
+| text              | text                     |                                                                    |
+| sharedWithParents | boolean                  | TEAM_ONLY is always false                                          |
+| replyTo           | ChildCheckInNote \| null | A reply points at the latest shared teacher note                   |
+| parentSeenAt / parentSeenBy | timestamptz / Member | Set the first time a guardian opens the child after it was shared |
 
 ### TitheAccount
 
@@ -21068,6 +21155,18 @@ Provides a security-grade check-in/check-out system for children. Key features:
 - `GET /children-church/children/:id` carries a transient `visitCount` (total `ChildCheckIn` rows for that child, not persisted — same pattern as `FirstTimer.visitCount`) so a child's own attendance history reads as a single number, not just a paginated `checkin-history` list.
 - A `ChildProfile` is **not** a `Member` or `FirstTimer` — a child has no digital-footprint timeline of their own. Instead, `MemberTimelineService.getTimeline()` carries a `childrenChurchDropOffs` count: every `ChildCheckIn` where the member is the `droppedOffBy`/`pickedUpBy` `ChildGuardian` (found via `ChildGuardian.member`), across every child they guard. This tracks the *guardian's* engagement, not the child's, and is deliberately kept separate from `visitCount` (which is the member's own visits) rather than folded into it — conflating "I visited" with "my kid was dropped off" would be misleading. `ChildGuardian`/`ChildCheckIn` are registered read-only in `MemberModule` (not by importing `ChildrenChurchModule`, which already imports `MemberModule` — that would be circular), same pattern as `SundaySchoolAttendance`/`Attendance`.
 
+**Parents, notes, late pickup and the HOD view (2026-11-16):**
+
+- **My Children** (`GET /children-church/children/mine`) lists children the caller is a guardian of, each with `inClassNow` and `lastVisit` (one extra grouped query on `child_check_ins` by `child_id`). A child can have several guardians; every one linked to a member account sees the child.
+- **Parent view** (`GET /children-church/children/mine/:id`, guardian only, else 404) returns the child, guardians (name, relationship, `isAuthorizedPickup`, `isMe` — no contact details), today's visit (church-local day; `receivedBy`/`handedBackBy` teacher names; `pickupCode` only for a guardian who can collect and only while `CHECKED_IN`), today's notes shared with parents (opening marks unseen teacher notes `parentSeenAt`/`parentSeenBy`), and today's away message.
+- Parents can edit date of birth, special notes (array, stored one per line; changes set `notesUpdatedBy`/`notesUpdatedAt` so the team sees "Updated by parent"), emergency contact and doctor (`PATCH /children-church/children/mine/:id`), upload a photo (`POST …/photo`, multipart `file`, images up to 5 MB, Cloudinary `child-photos`), set or clear today's away message naming a guardian who can collect (`PUT`/`DELETE …/away`; it counts only on `awayDate`, so it clears itself), and reply to today's notes (`POST …/notes`; needs a check-in today; pushes `CHILD_NOTE_REPLY` to the teacher who checked the child in and every teacher who wrote a note on that visit).
+- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit, family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
+- **Who handled the child**: `checkedInBy` was already saved; check-out now saves `checkedOutBy`. Both show on visits for the team, admins and parents (names only).
+- **Late pickup**: checking a child into a service slot schedules one Bull delayed job per slot (`children-church-late` queue, `jobId cc-late:<tenantId>:<slotId>`, so later check-ins add nothing) for 20 minutes after the slot's `endTime`. It marks still-checked-in visits `lateNotifiedAt` and pushes `CHILD_LATE_PICKUP` to their guardians who can collect. No scanning.
+- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (distinct `checkedInBy` today), collected, rooms (children in now, teachers who checked children into that class today, `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), late pickups, flagged visits, today's parent note changes, away messages, and this month's average Sunday, new children and children not seen for 3+ weeks (last visit 21–90 days ago). Cached in Redis for 60 s per church-day.
+- **Admin**: `GET /children-church/admin/children` (paged, max 50; `search` matches child or guardian name; `classGroupId`; `link=linked|unlinked`; returns guardians, how many are on the app, last visit, registered by, plus `counts`), `GET …/admin/children/:id` (guardians with member link, last 20 visits with teachers). With `children_church:write`: add a guardian, link or unlink a guardian's member account (`PATCH /children-church/admin/guardians/:id`), remove a guardian, edit notes, and search members (`GET …/admin/members/search?q=`). History accepts `teacherId` (matches who checked in or out).
+- The team can link a guardian to a member account too: `PATCH /children-church/guardians/:id` `{ memberId }`.
+
 **Routes prefix:** `/children-church`
 
 ---
@@ -22551,7 +22650,30 @@ outside the requested `?months=` window).
 | PATCH  | /children-church/class-groups/:id                          | AdminGuard (CHILDREN_CHURCH_WRITE)                            | Update class group                                                                                            |
 | DELETE | /children-church/class-groups/:id                          | AdminGuard (CHILDREN_CHURCH_WRITE)                            | Delete class group                                                                                            |
 | GET    | /children-church/class-groups?ageGroupId=                  | WORKER (CC-dept)                                              | List class groups (filterable by age group)                                                                   |
-| POST   | /children-church/children                                  | WORKER (CC-dept)                                              | Register child                                                                                                |
+| GET    | /children-church/children/mine | Any signed-in member | Children the caller is a guardian of, each with `inClassNow` |
+| GET    | /children-church/children/mine/:id | Guardian of that child | Parent view: child, guardians, today's visit, notes, away message |
+| PATCH  | /children-church/children/mine/:id | Guardian of that child | Edit date of birth, special notes, emergency contact, doctor |
+| POST   | /children-church/children/mine/:id/photo | Guardian of that child | Upload a photo (multipart `file`, image, max 5 MB) |
+| PUT    | /children-church/children/mine/:id/away | Guardian of that child | Today's message: who is collecting (`collectorGuardianId`), optional `message` |
+| DELETE | /children-church/children/mine/:id/away | Guardian of that child | Clear today's message |
+| POST   | /children-church/children/mine/:id/notes | Guardian of that child | Reply to today's teacher notes |
+| GET    | /children-church/roster | WORKER (CC-dept) | Paged children with parents and link status (`search`, `link=linked\|unlinked`, `page`), plus counts |
+| GET    | /children-church/checkin/:id/detail | WORKER (CC-dept) | One visit with family contacts, away message and notes |
+| POST   | /children-church/checkin/:id/notes | WORKER (CC-dept) | Add a note (`kind`, `text`, `shareWithParents`) |
+| PATCH  | /children-church/guardians/:id | WORKER (CC-dept) | Link or unlink a guardian's member account (`memberId`) |
+| GET    | /children-church/lead | Any signed-in member | `{ isLead }`: HOD or deputy of the Children's Church department |
+| GET    | /children-church/dashboard/today | HOD / deputy HOD | Today at a glance (cached 60 s) |
+| GET    | /children-church/admin/children | ADMIN `children_church:read` | Paged children list with guardians, link status, last visit, counts |
+| GET    | /children-church/admin/children/:id | ADMIN `children_church:read` | Child, guardians with member link, last 20 visits with teachers |
+| POST   | /children-church/admin/children/:id/guardians | ADMIN `children_church:write` | Add a guardian |
+| PATCH  | /children-church/admin/guardians/:id | ADMIN `children_church:write` | Link or unlink a guardian's member account |
+| DELETE | /children-church/admin/guardians/:id | ADMIN `children_church:write` | Remove a guardian |
+| PATCH  | /children-church/admin/children/:id/notes | ADMIN `children_church:write` | Edit special notes |
+| GET    | /children-church/admin/teachers | ADMIN `children_church:read` | Everyone who checked a child in or out in the last 90 days (for the history filter) |
+| GET    | /children-church/admin/members/search?q= | ADMIN `children_church:write` | Up to 10 active members by name |
+| GET    | /children-church/children/mine/:id/checkin-history         | Any signed-in member (guardian of that child)                 | That child's check-ins (max limit 50); 404 for non-guardians                                                  |
+| GET    | /children-church/members/search?q=                         | WORKER (CC-dept)                                              | Up to 10 active members by name, for linking a guardian                                                      |
+| POST   | /children-church/children                                  | WORKER (CC-dept)                                              | Register child; optional `guardians[]` saved in the same transaction                                          |
 | PATCH  | /children-church/children/:id                              | WORKER (CC-dept)                                              | Update child profile                                                                                          |
 | GET    | /children-church/children/:id                              | WORKER (CC-dept)                                              | Get child by ID                                                                                               |
 | GET    | /children-church/children/:id/checkin-history              | WORKER (CC-dept)                                              | Child check-in history (paginated)                                                                            |

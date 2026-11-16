@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ChildrenChurchService } from '../service/children-church.service';
 import { RolesGuard } from '../../auth/guard/roles.guard';
+import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import {
@@ -28,6 +29,7 @@ import {
   UpdateChildProfileDto,
 } from '../dto/create-child-profile.dto';
 import { CreateGuardianDto } from '../dto/create-guardian.dto';
+import { LinkGuardianDto } from '../dto/child-care.dto';
 import { ChildCheckInDto } from '../dto/child-check-in.dto';
 import { ChildCheckOutDto } from '../dto/child-check-out.dto';
 import { FlagCheckInDto } from '../dto/flag-check-in.dto';
@@ -113,6 +115,35 @@ export class ChildrenChurchController {
   }
 
   // ─── Children ─────────────────────────────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard)
+  @Get('children/mine')
+  async getMyChildren(@Request() req: any) {
+    return this.childrenChurchService.getMyChildren(req.user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('children/mine/:id/checkin-history')
+  async getMyChildCheckInHistory(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.childrenChurchService.getMyChildCheckInHistory(
+      req.user,
+      id,
+      +page,
+      Math.min(+limit, 50),
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('members/search')
+  async searchMembersForGuardian(@Request() req: any, @Query('q') q = '') {
+    return this.childrenChurchService.searchMembersForGuardian(req.user, q);
+  }
 
   @UseGuards(RolesGuard)
   @Roles(MemberRoleEnum.WORKER)
@@ -200,6 +231,21 @@ export class ChildrenChurchController {
 
   @UseGuards(RolesGuard)
   @Roles(MemberRoleEnum.WORKER)
+  @Patch('guardians/:id')
+  async linkGuardian(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkGuardianDto,
+  ) {
+    return this.childrenChurchService.linkGuardian(
+      req.user,
+      id,
+      dto.memberId ?? null,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
   @Delete('guardians/:id')
   async removeGuardian(
     @Request() req: any,
@@ -268,6 +314,7 @@ export class ChildrenChurchController {
     @Query('classGroupId') classGroupId?: string,
     @Query('status') status?: string,
     @Query('slotId') slotId?: string,
+    @Query('teacherId') teacherId?: string,
   ) {
     return this.childrenChurchService.getCheckInHistoryAdmin(
       +page,
@@ -275,6 +322,7 @@ export class ChildrenChurchController {
       classGroupId,
       status as any,
       slotId,
+      teacherId,
     );
   }
 

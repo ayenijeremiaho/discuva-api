@@ -25,7 +25,8 @@ export type CloudinaryFolder =
   | 'form-logos'
   | 'form-submissions'
   | 'page-images'
-  | 'church-calendar-images';
+  | 'church-calendar-images'
+  | 'child-photos';
 
 const FILE_TYPES = ['image', 'video', 'raw'];
 const DELETE_BATCH = 100;

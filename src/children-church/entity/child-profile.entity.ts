@@ -26,8 +26,14 @@ export class ChildProfile extends BaseEntity {
   @Column()
   lastname: string;
 
-  @Column({ type: 'date' })
-  dateOfBirth: string;
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  ageRange: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  ageRangeSetOn: string | null;
 
   @Column({ nullable: true })
   photoUrl: string | null;
@@ -48,6 +54,43 @@ export class ChildProfile extends BaseEntity {
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'registered_by_id' })
   registeredBy: Member | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  emergencyContactName: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  emergencyContactRelationship: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  emergencyContactPhone: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  doctorName: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  doctorPhone: string | null;
+
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'notes_updated_by_id' })
+  notesUpdatedBy: Member | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  notesUpdatedAt: Date | null;
+
+  // Away message counts only on awayDate (church-local day), so it clears itself.
+  @Column({ type: 'date', nullable: true })
+  awayDate: string | null;
+
+  @ManyToOne(() => ChildGuardian, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'away_collector_id' })
+  awayCollector: ChildGuardian | null;
+
+  @Column({ type: 'text', nullable: true })
+  awayMessage: string | null;
+
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'away_set_by_id' })
+  awaySetBy: Member | null;
 
   @OneToMany(() => ChildGuardian, (guardian) => guardian.child)
   guardians: ChildGuardian[];

@@ -74,6 +74,9 @@ export enum PushNotificationKey {
   ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
   ROTA_COVER_TAKEN = 'ROTA_COVER_TAKEN',
   ROTA_CHECKIN_NUDGE = 'ROTA_CHECKIN_NUDGE',
+  CHILD_NOTE_SHARED = 'CHILD_NOTE_SHARED',
+  CHILD_NOTE_REPLY = 'CHILD_NOTE_REPLY',
+  CHILD_LATE_PICKUP = 'CHILD_LATE_PICKUP',
 }
 
 export interface PushTemplate {
@@ -948,6 +951,44 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       department_name: 'Ushering',
       time: '8:00 AM',
     },
+  },
+  [PushNotificationKey.CHILD_NOTE_SHARED]: {
+    category: EmailCategory.CHILDREN_CHURCH,
+    label: "Note from Children's Church",
+    description:
+      "Sent to a child's parents and guardians on the app when a teacher shares a note about today.",
+    title: 'A note about {{child_name}}',
+    body: '{{teacher_name}}: {{note}}',
+    url: '/children-church',
+    placeholders: {
+      child_name: 'Tobi',
+      teacher_name: 'Funmi Lawal',
+      note: 'Tobi said the memory verse all by himself today.',
+    },
+  },
+  [PushNotificationKey.CHILD_NOTE_REPLY]: {
+    category: EmailCategory.CHILDREN_CHURCH,
+    label: 'Parent replied to a note',
+    description:
+      "Sent to the teachers on a child's check-in when a parent replies.",
+    title: '{{parent_name}} replied about {{child_name}}',
+    body: '{{note}}',
+    url: '/children-church',
+    placeholders: {
+      parent_name: 'Grace Ade',
+      child_name: 'Tobi',
+      note: 'Thank you for checking!',
+    },
+  },
+  [PushNotificationKey.CHILD_LATE_PICKUP]: {
+    category: EmailCategory.CHILDREN_CHURCH,
+    label: 'Child waiting to be collected',
+    description:
+      "Sent to a child's guardians who can collect, 20 minutes after the service ends if the child is still checked in.",
+    title: '{{child_name}} is waiting to be collected',
+    body: 'The service ended a while ago. Please collect {{child_name}} from {{room}}.',
+    url: '/children-church',
+    placeholders: { child_name: 'Tobi', room: 'Preschool' },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {
     category: EmailCategory.FELLOWSHIPS,

@@ -1,0 +1,7 @@
+export enum ChildNoteKind {
+  FEEDBACK = 'FEEDBACK',
+  MEAL = 'MEAL',
+  INCIDENT = 'INCIDENT',
+  TEAM_ONLY = 'TEAM_ONLY',
+  PARENT_REPLY = 'PARENT_REPLY',
+}

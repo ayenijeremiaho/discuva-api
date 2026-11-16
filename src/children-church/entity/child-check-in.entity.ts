@@ -62,6 +62,13 @@ export class ChildCheckIn extends BaseEntity {
   @JoinColumn({ name: 'checked_in_by_id' })
   checkedInBy: Member | null;
 
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'checked_out_by_id' })
+  checkedOutBy: Member | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lateNotifiedAt: Date | null;
+
   @Column({ nullable: true, type: 'text' })
   flagReason: string | null;
 }

@@ -23,6 +23,11 @@ export class CreateChildClassGroupDto {
   @IsString()
   @IsOptional()
   teacherNote?: string;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  childrenPerTeacher?: number | null;
 }
 
 export class UpdateChildClassGroupDto {
@@ -39,4 +44,9 @@ export class UpdateChildClassGroupDto {
   @IsString()
   @IsOptional()
   teacherNote?: string;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  childrenPerTeacher?: number | null;
 }
