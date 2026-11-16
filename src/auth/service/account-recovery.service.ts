@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -28,6 +29,7 @@ import { AuthService } from './auth.service';
 @Injectable()
 export class AccountRecoveryService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     private readonly accounts: DiscuvaAccountService,
     private readonly codes: DiscuvaAccountCodeService,
     private readonly memberService: MemberService,
@@ -159,7 +161,8 @@ export class AccountRecoveryService {
     const target = await this.adminService.findByMemberId(memberId);
     if (!target) return;
     const actor = await this.adminService.findByMemberId(actorId);
-    const mine = new Set(actor?.adminRole?.permissions ?? []);
+    await this.adminService.assertCanRecoverFormAccess(actor, target);
+    const mine = new Set(await this.adminAccess.permissions(actor));
     if (!mine.has(AdminPermission.ADMIN_WRITE)) {
       throw new ForbiddenException(
         'Recovering an admin needs the Manage Admin Users & Roles permission.',
@@ -167,7 +170,7 @@ export class AccountRecoveryService {
     }
     const bigger =
       (target.isOwner && !actor?.isOwner) ||
-      (target.adminRole?.permissions ?? []).some((p) => !mine.has(p));
+      (await this.adminAccess.permissions(target)).some((p) => !mine.has(p));
     if (bigger) {
       throw new ForbiddenException(
         "You can't recover an admin whose role can do more than yours.",

@@ -1,3 +1,5 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
 import ExcelJS from 'exceljs';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -231,6 +233,7 @@ describe('TitheService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         TitheService,
         {
           provide: getRepositoryToken(TitheAccount),

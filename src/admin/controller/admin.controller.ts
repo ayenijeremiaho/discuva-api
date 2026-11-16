@@ -58,12 +58,14 @@ export class AdminController {
       where: { id: this.cls.get('tenantId'), closedAt: Not(IsNull()) },
     });
     if (closed && me.adminRole) {
+      const readOnly = (list?: string[]) =>
+        (list ?? []).filter((p) => p.endsWith(':read')) as never;
       me.adminRole = {
         ...me.adminRole,
-        permissions: me.adminRole.permissions.filter((p) =>
-          p.endsWith(':read'),
-        ),
+        permissions: readOnly(me.adminRole.permissions),
       };
+      me.effectivePermissions = readOnly(me.effectivePermissions);
+      me.additionalPermissions = readOnly(me.additionalPermissions);
     }
     return me;
   }

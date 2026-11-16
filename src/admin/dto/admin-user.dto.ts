@@ -1,15 +1,37 @@
 import {
   ArrayMaxSize,
+  ArrayUnique,
+  IsEnum,
+  IsIn,
   IsArray,
   IsBoolean,
   IsNotEmpty,
   IsOptional,
   IsUUID,
+  ValidateIf,
   Matches,
   MaxLength,
 } from 'class-validator';
 
-export class GrantAdminDto {
+import {
+  AdminPermission,
+  INDIVIDUAL_PERMISSIONS,
+} from '../enum/admin-permission.enum';
+
+class AdditionalPermissionsDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(INDIVIDUAL_PERMISSIONS.length)
+  @IsIn(INDIVIDUAL_PERMISSIONS, {
+    each: true,
+    message:
+      'Forms access is given through a role or Assigned forms, not as an individual permission.',
+  })
+  additionalPermissions?: AdminPermission[];
+}
+
+export class GrantAdminDto extends AdditionalPermissionsDto {
   @IsUUID()
   @IsNotEmpty()
   memberId: string;
@@ -19,7 +41,7 @@ export class GrantAdminDto {
   adminRoleId: string;
 }
 
-export class UpdateAdminUserDto {
+export class UpdateAdminUserDto extends AdditionalPermissionsDto {
   @IsUUID()
   @IsOptional()
   adminRoleId?: string;

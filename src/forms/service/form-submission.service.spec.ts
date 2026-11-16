@@ -1,3 +1,5 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -121,6 +123,7 @@ describe('FormSubmissionService', () => {
     mockFormAttemptService.getInProgressAttempt.mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         FormSubmissionService,
         { provide: getRepositoryToken(Form), useValue: mockFormRepo },
         {

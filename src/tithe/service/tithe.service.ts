@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -117,6 +118,7 @@ export class TitheService {
   // ── Tithe Accounts ────────────────────────────────────────────────────────
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(TitheAccount)
     private readonly accountRepo: Repository<TitheAccount>,
     @InjectRepository(TitheUploadBatch)
@@ -1341,10 +1343,9 @@ export class TitheService {
       .where('a.isActive = true')
       .getMany();
 
-    const recipients = admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(AdminPermission.FINANCE_WRITE),
-      )
+    const recipients = (
+      await this.adminAccess.filter(admins, AdminPermission.FINANCE_WRITE)
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
 

@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   Injectable,
@@ -62,6 +63,7 @@ export class FormSubmissionService {
   private readonly defaultPhoneRegion: CountryCode;
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(Form)
     private readonly formRepo: Repository<Form>,
     @InjectRepository(FormSubmission)
@@ -667,10 +669,9 @@ export class FormSubmissionService {
       .where('a.isActive = true')
       .getMany();
 
-    const recipients = admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(AdminPermission.FORMS_WRITE),
-      )
+    const recipients = (
+      await this.adminAccess.filter(admins, AdminPermission.FORMS_WRITE)
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
 

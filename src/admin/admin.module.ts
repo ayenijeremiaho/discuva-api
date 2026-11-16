@@ -1,3 +1,5 @@
+import { AdminAccessService } from './service/admin-access.service';
+import { FormAdminAccess } from './entity/form-admin-access.entity';
 import { Global, Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Admin } from './entity/admin.entity';
@@ -20,7 +22,7 @@ import { UtilityModule } from '../utility/utility.module';
 @Global()
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([Admin, AdminRole]),
+    TenantTypeOrmModule.forFeature([Admin, AdminRole, FormAdminAccess]),
     TypeOrmModule.forFeature([Tenant]),
     MemberModule,
     UtilityModule,
@@ -32,6 +34,7 @@ import { UtilityModule } from '../utility/utility.module';
     AdminRoleController,
   ],
   providers: [
+    AdminAccessService,
     AdminService,
     AdminRoleService,
     AdminTwoFactorService,
@@ -40,6 +43,8 @@ import { UtilityModule } from '../utility/utility.module';
     DefaultAdminSeed,
   ],
   exports: [
+    AdminOwnerService,
+    AdminAccessService,
     AdminService,
     AdminRoleService,
     AdminTwoFactorService,

@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -70,6 +71,7 @@ const SHAREABLE_AUDIENCES = new Set([
 @Injectable()
 export class AnnouncementService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(Announcement)
     private readonly announcementRepo: Repository<Announcement>,
     @InjectRepository(AnnouncementReaction)
@@ -366,7 +368,7 @@ export class AnnouncementService {
     admin: Admin,
   ): Promise<void> {
     if (!sendViaSms) return;
-    if (!admin.adminRole.permissions.includes(AdminPermission.SMS_SEND)) {
+    if (!(await this.adminAccess.has(admin, AdminPermission.SMS_SEND))) {
       throw new ForbiddenException(
         `Missing required permission: ${AdminPermission.SMS_SEND}`,
       );

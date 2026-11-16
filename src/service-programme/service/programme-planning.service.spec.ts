@@ -1,3 +1,4 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
 // ServiceProgrammeService pulls in jsdom through SanitizationService.
 jest.mock('../../utility/service/sanitization.service', () => ({
   SanitizationService: jest.fn(),
@@ -48,6 +49,7 @@ describe('ProgrammePlanningService', () => {
     ),
   };
   const service = new ProgrammePlanningService(
+    mockAdminAccess as never,
     slotRepo as never,
     programmeRepo as never,
     memberRepo as never,

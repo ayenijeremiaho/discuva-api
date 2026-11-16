@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,6 +34,7 @@ export class FollowUpScheduler {
   private readonly churchName: string;
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(FollowUpTask)
     private readonly taskRepo: Repository<FollowUpTask>,
     @InjectRepository(Admin)
@@ -143,9 +145,14 @@ export class FollowUpScheduler {
       .innerJoinAndSelect('a.member', 'm')
       .innerJoinAndSelect('a.adminRole', 'r')
       .where('a.isActive = true')
-      .andWhere(':perm = ANY(r.permissions)', {
-        perm: AdminPermission.FOLLOW_UP_WRITE,
-      })
+      .andWhere(
+        (await this.adminAccess.isOn())
+          ? '(:perm = ANY(r.permissions) OR :perm = ANY(a.additional_permissions))'
+          : ':perm = ANY(r.permissions)',
+        {
+          perm: AdminPermission.FOLLOW_UP_WRITE,
+        },
+      )
       .getMany();
 
     for (const admin of followUpAdmins) {
@@ -225,9 +232,14 @@ export class FollowUpScheduler {
       .innerJoinAndSelect('a.member', 'm')
       .innerJoinAndSelect('a.adminRole', 'r')
       .where('a.isActive = true')
-      .andWhere(':perm = ANY(r.permissions)', {
-        perm: AdminPermission.FOLLOW_UP_WRITE,
-      })
+      .andWhere(
+        (await this.adminAccess.isOn())
+          ? '(:perm = ANY(r.permissions) OR :perm = ANY(a.additional_permissions))'
+          : ':perm = ANY(r.permissions)',
+        {
+          perm: AdminPermission.FOLLOW_UP_WRITE,
+        },
+      )
       .getMany();
 
     for (const admin of admins) {

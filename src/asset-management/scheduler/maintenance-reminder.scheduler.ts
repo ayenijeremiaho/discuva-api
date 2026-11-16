@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -24,6 +25,7 @@ export class MaintenanceReminderScheduler {
   private static readonly LOCK_KEY = 'lock:asset-maintenance-reminders';
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(MaintenanceSchedule)
     private readonly scheduleRepo: Repository<MaintenanceSchedule>,
     @InjectRepository(Admin)
@@ -199,12 +201,12 @@ export class MaintenanceReminderScheduler {
       .where('a.isActive = true')
       .getMany();
 
-    return admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(
-          AdminPermission.ASSET_MAINTENANCE_ALERT,
-        ),
+    return (
+      await this.adminAccess.filter(
+        admins,
+        AdminPermission.ASSET_MAINTENANCE_ALERT,
       )
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
   }

@@ -1,3 +1,5 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -240,6 +242,7 @@ describe('ServiceSessionService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         {
           provide: ChurchTimezoneService,
           useValue: {

@@ -1,3 +1,5 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -36,7 +38,10 @@ const members: Record<string, object> = {
   'm-admin': { id: 'm-admin', firstname: 'admin', discuvaAccountId: null },
 };
 const memberService = { getById: jest.fn(async (id: string) => members[id]) };
-const adminService = { findByMemberId: jest.fn() };
+const adminService = {
+  findByMemberId: jest.fn(),
+  assertCanRecoverFormAccess: jest.fn().mockResolvedValue(undefined),
+};
 const utility = {
   resolveChurchName: jest.fn().mockResolvedValue('the church'),
   sendEmailWithTemplate: jest.fn(),
@@ -68,6 +73,7 @@ describe('AccountRecoveryService', () => {
     adminService.findByMemberId.mockResolvedValue(null);
     const module = await Test.createTestingModule({
       providers: [
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         AccountRecoveryService,
         { provide: DiscuvaAccountService, useValue: accounts },
         { provide: DiscuvaAccountCodeService, useValue: codes },

@@ -21,7 +21,12 @@ describe('AdminGuard for overseers', () => {
     recordView: jest.fn().mockResolvedValue(undefined),
   };
   const repo = { findOne: jest.fn() };
-  const guard = new AdminGuard(reflector, repo as never, access as never);
+  const guard = new AdminGuard(
+    reflector,
+    {} as never,
+    repo as never,
+    access as never,
+  );
   const user = {
     id: 'ov-1',
     surface: SessionSurface.OVERSEER,

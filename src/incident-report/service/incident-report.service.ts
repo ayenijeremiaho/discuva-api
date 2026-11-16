@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   HttpException,
   HttpStatus,
@@ -28,6 +29,7 @@ export class IncidentReportService {
   private readonly logger = new Logger(IncidentReportService.name);
 
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(IncidentReport)
     private readonly reportRepo: Repository<IncidentReport>,
     @InjectRepository(Admin)
@@ -202,12 +204,12 @@ export class IncidentReportService {
       .where('a.isActive = true')
       .getMany();
 
-    const recipients = admins
-      .filter((a) =>
-        a.adminRole?.permissions?.includes(
-          AdminPermission.INCIDENT_REPORT_WRITE,
-        ),
+    const recipients = (
+      await this.adminAccess.filter(
+        admins,
+        AdminPermission.INCIDENT_REPORT_WRITE,
       )
+    )
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
 

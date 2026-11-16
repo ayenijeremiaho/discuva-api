@@ -19,6 +19,7 @@ import { DateService } from '../../utility/service/date.service';
 import { FormFieldDto } from '../dto/form.dto';
 
 const mockFormRepo = {
+  existsBy: jest.fn().mockResolvedValue(true),
   create: jest.fn((v) => v),
   save: jest.fn((v) => Promise.resolve({ id: 'form-1', ...v })),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -46,6 +47,8 @@ const mockSubmissionRepo = {
 function makeSubmissionQueryBuilderMock() {
   const builder: {
     leftJoinAndSelect: jest.Mock;
+    leftJoin: jest.Mock;
+    select: jest.Mock;
     where: jest.Mock;
     orderBy: jest.Mock;
     addOrderBy: jest.Mock;
@@ -54,6 +57,8 @@ function makeSubmissionQueryBuilderMock() {
     getManyAndCount: jest.Mock;
   } = {
     leftJoinAndSelect: jest.fn(() => builder),
+    leftJoin: jest.fn(() => builder),
+    select: jest.fn(() => builder),
     where: jest.fn(() => builder),
     orderBy: jest.fn(() => builder),
     addOrderBy: jest.fn(() => builder),
@@ -2523,14 +2528,23 @@ describe('FormService', () => {
   });
 
   describe('getSubmissions', () => {
-    it('sorts by createdAt DESC by default (unpaginated fields untouched)', async () => {
-      mockFormRepo.findOne.mockResolvedValue({ id: 'form-1', fields: [] });
-      mockSubmissionRepo.findAndCount.mockResolvedValue([[], 0]);
-      await service.getSubmissions('form-1');
-      expect(mockSubmissionRepo.findAndCount).toHaveBeenCalledWith(
-        expect.objectContaining({ order: { createdAt: 'DESC' } }),
+    it('bounds pagination and selects only response identity fields', async () => {
+      const qb = makeSubmissionQueryBuilderMock();
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+      await service.getSubmissions('form-1', -2, 10000);
+      expect(qb.orderBy).toHaveBeenCalledWith('submission.createdAt', 'DESC');
+      expect(qb.take).toHaveBeenCalledWith(100);
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.select).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          'member.id',
+          'member.firstname',
+          'member.lastname',
+        ]),
       );
-      expect(mockSubmissionRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(qb.select.mock.calls[0][0]).not.toContain('member');
+      expect(qb.addOrderBy).toHaveBeenCalledWith('submission.id', 'DESC');
+      expect(mockFormRepo.findOne).not.toHaveBeenCalled();
     });
 
     it('sorts by score DESC with NULLS LAST when sortBy is score, for a QUIZ leaderboard', async () => {

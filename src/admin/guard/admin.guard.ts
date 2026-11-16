@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../service/admin-access.service';
 import { REQUIRES_OWNER_KEY } from '../decorator/requires-owner.decorator';
 import {
   CanActivate,
@@ -25,6 +26,7 @@ import {
 export class AdminGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
+    private readonly access: AdminAccessService,
     @InjectRepository(Admin)
     private readonly adminRepository: Repository<Admin>,
     @Optional() private readonly overseers?: OverseerAccessService,
@@ -56,7 +58,7 @@ export class AdminGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    if (required && !admin.adminRole.permissions.includes(required)) {
+    if (required && !(await this.access.has(admin, required))) {
       throw new ForbiddenException(`Missing required permission: ${required}`);
     }
 

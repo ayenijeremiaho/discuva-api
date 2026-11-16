@@ -1,3 +1,5 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
@@ -50,6 +52,7 @@ describe('ServiceRatingService', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AdminAccessService, useValue: mockAdminAccess },
         ServiceRatingService,
         {
           provide: getRepositoryToken(ServiceRating),

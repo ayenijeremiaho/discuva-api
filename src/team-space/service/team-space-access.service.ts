@@ -1,3 +1,4 @@
+import { AdminAccessService } from '../../admin/service/admin-access.service';
 import {
   ForbiddenException,
   Injectable,
@@ -100,6 +101,7 @@ export function isUnder18(
 @Injectable()
 export class TeamSpaceAccessService {
   constructor(
+    private readonly adminAccess: AdminAccessService,
     @InjectRepository(TeamSpace)
     private readonly spaceRepo: Repository<TeamSpace>,
     private readonly churchSettings: ChurchSettingsService,
@@ -134,7 +136,7 @@ export class TeamSpaceAccessService {
     const rows = (await this.spaceRepo.query(
       `SELECT EXISTS (SELECT 1 FROM community_moderators WHERE member_id = $1)
          OR EXISTS (SELECT 1 FROM admins a JOIN admin_roles r ON r.id = a.admin_role_id
-                    WHERE a.member_id = $1 AND a.is_active AND 'community:moderate' = ANY(r.permissions)) AS moderator`,
+                    WHERE a.member_id = $1 AND a.is_active AND ('community:moderate' = ANY(r.permissions) ${(await this.adminAccess.isOn()) ? "OR 'community:moderate' = ANY(a.additional_permissions)" : ''})) AS moderator`,
       [memberId],
     )) as { moderator: boolean }[];
     return !!rows[0]?.moderator;

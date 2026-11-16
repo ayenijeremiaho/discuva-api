@@ -1,3 +1,4 @@
+import { mockAdminAccess } from '../../admin/testing/admin-access.mock';
 import {
   BadRequestException,
   ForbiddenException,
@@ -55,6 +56,7 @@ describe('CommunityService', () => {
   const audit = { log: jest.fn() };
   const settings = { getNumber: jest.fn().mockResolvedValue(8) };
   const service = new CommunityService(
+    mockAdminAccess as never,
     reportRepo as never,
     categoryRepo as never,
     postRepo as never,
