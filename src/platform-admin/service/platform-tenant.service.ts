@@ -11,7 +11,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { TenantRollup } from '../../branch/entity/tenant-rollup.entity';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -79,6 +80,7 @@ export interface TenantWithHealth {
   discountExpiresAt: Date | null;
   memberCount: number | null;
   eventCount: number | null;
+  lastActiveAt: Date | null;
   adminCount: number | null;
   lastAdminSignInAt: Date | null;
   lastMemberSignInAt: Date | null;
@@ -86,6 +88,28 @@ export interface TenantWithHealth {
   lastEventOn: string | null;
   moduleOverrides: Record<string, boolean> | null;
 }
+
+export interface TenantListQuery {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: 'active' | 'suspended';
+  verification?: 'to_verify' | 'verified';
+  plan?: string;
+  orgType?: string;
+}
+
+export interface TenantPage {
+  data: TenantWithHealth[];
+  page: number;
+  limit: number;
+  totalCount: number;
+  totalPages: number;
+  toVerifyCount: number;
+}
+
+// Matches the console's "To verify": an unverified church, or a sign-up waiting for approval.
+const TO_VERIFY = `(t.verification_status = 'PENDING' OR t.onboarding_status = 'AWAITING_APPROVAL')`;
 
 @Injectable()
 export class PlatformTenantService {
@@ -109,6 +133,8 @@ export class PlatformTenantService {
     private readonly planRepo: Repository<Plan>,
     @InjectRepository(TenantOnboardingEvent)
     private readonly onboardingEventRepo: Repository<TenantOnboardingEvent>,
+    @InjectRepository(TenantRollup)
+    private readonly rollupRepo: Repository<TenantRollup>,
     private readonly provisioningService: TenantProvisioningService,
     private readonly churchRequests: ChurchRequestService,
     private readonly churchDeletion: ChurchDeletionService,
@@ -133,18 +159,91 @@ export class PlatformTenantService {
   // is deliberately not included yet — no single existing column captures
   // it cleanly across both member and admin sessions; a real answer needs
   // its own design pass, not a guess bolted on here.
-  async listTenants(): Promise<TenantWithHealth[]> {
-    const [tenants, subscriptions] = await Promise.all([
-      this.tenantRepo.find({ order: { createdAt: 'DESC' } }),
-      this.subscriptionRepo.find(),
+  // One page of churches from shared tables only: no per-church queries. Live health is read by getTenant, one church at a time.
+  async listTenants(q: TenantListQuery): Promise<TenantPage> {
+    const qb = this.tenantRepo.createQueryBuilder('t');
+    const search = q.search?.trim();
+    if (search) {
+      const like = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+      qb.andWhere('(t.name ILIKE :like OR t.subdomain ILIKE :like)', { like });
+    }
+    if (q.status === 'active') qb.andWhere('t.isActive = true');
+    if (q.status === 'suspended') qb.andWhere('t.isActive = false');
+    if (q.verification === 'to_verify') qb.andWhere(TO_VERIFY);
+    if (q.verification === 'verified')
+      qb.andWhere('t.verificationStatus = :verified', {
+        verified: TenantVerificationStatus.VERIFIED,
+      });
+    if (q.orgType) qb.andWhere('t.orgType = :orgType', { orgType: q.orgType });
+    if (q.plan)
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM subscriptions s WHERE s.tenant_id = t.id AND s.plan_id = :plan)',
+        { plan: q.plan },
+      );
+    const [[tenants, totalCount], toVerifyCount] = await Promise.all([
+      qb
+        .orderBy('t.createdAt', 'DESC')
+        .addOrderBy('t.id', 'DESC')
+        .skip((q.page - 1) * q.limit)
+        .take(q.limit)
+        .getManyAndCount(),
+      this.tenantRepo.createQueryBuilder('t').where(TO_VERIFY).getCount(),
     ]);
+    const ids = tenants.map((t) => t.id);
+    const [subscriptions, rollups] = ids.length
+      ? await Promise.all([
+          this.subscriptionRepo.find({ where: { tenantId: In(ids) } }),
+          this.rollupRepo.find({
+            where: { tenantId: In(ids) },
+            select: { tenantId: true, memberCount: true },
+          }),
+        ])
+      : [[], []];
     const subByTenant = new Map(subscriptions.map((s) => [s.tenantId, s]));
+    const members = new Map(rollups.map((r) => [r.tenantId, r.memberCount]));
+    return {
+      data: tenants.map((tenant) => ({
+        ...this.baseShape(tenant, subByTenant.get(tenant.id)),
+        memberCount: members.get(tenant.id) ?? null,
+      })),
+      page: q.page,
+      limit: q.limit,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / q.limit)),
+      toVerifyCount,
+    };
+  }
 
-    return Promise.all(
-      tenants.map((tenant) =>
-        this.toHealthShape(tenant, subByTenant.get(tenant.id)),
-      ),
-    );
+  // One church with live health from its own schema: only when it is opened.
+  async getTenant(id: string): Promise<TenantWithHealth> {
+    return this.toHealthShape(await this.findTenantOrThrow(id));
+  }
+
+  // Name search for pickers, and names for ids already chosen; never the whole list.
+  async lookupTenants(
+    search?: string,
+    ids: string[] = [],
+  ): Promise<{ id: string; name: string; subdomain: string }[]> {
+    const select = { id: true, name: true, subdomain: true } as const;
+    const term = search?.trim();
+    const [byIds, matches] = await Promise.all([
+      ids.length
+        ? this.tenantRepo.find({ where: { id: In(ids.slice(0, 200)) }, select })
+        : [],
+      term
+        ? this.tenantRepo
+            .createQueryBuilder('t')
+            .select(['t.id', 't.name', 't.subdomain'])
+            .where('(t.name ILIKE :like OR t.subdomain ILIKE :like)', {
+              like: `%${term.replace(/[\\%_]/g, '\\$&')}%`,
+            })
+            .orderBy('t.name', 'ASC')
+            .take(20)
+            .getMany()
+        : [],
+    ]);
+    const seen = new Map([...byIds, ...matches].map((t) => [t.id, t]));
+    return [...seen.values()];
   }
 
   // No adminPassword collected here — the platform admin isn't the one
@@ -763,6 +862,15 @@ export class PlatformTenantService {
       this.safeActivity(tenant.schemaName),
     ]);
     return {
+      ...this.baseShape(tenant, sub ?? undefined),
+      memberCount,
+      eventCount,
+      ...activity,
+    };
+  }
+
+  private baseShape(tenant: Tenant, sub?: Subscription): TenantWithHealth {
+    return {
       id: tenant.id,
       verificationStatus: tenant.verificationStatus,
       archivedAt: tenant.archivedAt,
@@ -789,9 +897,14 @@ export class PlatformTenantService {
       discountValue: sub?.discountValue ?? null,
       discountReason: sub?.discountReason ?? null,
       discountExpiresAt: sub?.discountExpiresAt ?? null,
-      memberCount,
-      eventCount,
-      ...activity,
+      memberCount: null,
+      eventCount: null,
+      lastActiveAt: tenant.lastActiveAt ?? null,
+      adminCount: null,
+      lastAdminSignInAt: null,
+      lastMemberSignInAt: null,
+      membersActiveLast30Days: null,
+      lastEventOn: null,
       moduleOverrides: tenant.moduleOverrides,
     };
   }

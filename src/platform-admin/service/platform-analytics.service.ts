@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Plan } from '../../billing/entity/plan.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
@@ -301,16 +301,17 @@ export class PlatformAnalyticsService {
     period: AnalyticsPeriod,
     months: number,
   ): Promise<GrowthAnalytics> {
+    const since = this.monthsAgo(months);
     const [tenants, activeTenants, totalTenants] = await Promise.all([
       this.tenantRepo.find({
         select: ['createdAt'],
+        where: { createdAt: MoreThanOrEqual(since) },
         order: { createdAt: 'ASC' },
       }),
       this.tenantRepo.count({ where: { isActive: true } }),
       this.tenantRepo.count(),
     ]);
 
-    const since = this.monthsAgo(months);
     const bucketMap = new Map<string, number>();
     for (const tenant of tenants) {
       if (tenant.createdAt < since) continue;

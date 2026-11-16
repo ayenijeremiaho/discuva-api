@@ -1,3 +1,6 @@
+jest.mock('../../utility/service/sanitization.service', () => ({
+  SanitizationService: class {},
+}));
 import { NetworkEventsScheduler } from './network-events.scheduler';
 import { NetworkMonthlyReportScheduler } from './network-monthly-report.scheduler';
 import { NetworkCopyProcessor } from '../processor/network-copy.processor';

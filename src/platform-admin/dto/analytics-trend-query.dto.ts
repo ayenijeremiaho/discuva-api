@@ -1,5 +1,5 @@
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export type AnalyticsPeriod = 'daily' | 'weekly' | 'monthly';
 
@@ -10,7 +10,15 @@ export type AnalyticsPeriod = 'daily' | 'weekly' | 'monthly';
 // endpoint) — unbounded would eventually mean scanning every tenant/
 // checkout-session/cancellation ever, for a chart nobody would want that
 // granular anyway.
-export class AnalyticsTrendQueryDto {
+// Refresh asks for fresh figures; otherwise each section is served from a 10-minute cache.
+export class AnalyticsFreshQueryDto {
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  fresh?: boolean;
+}
+
+export class AnalyticsTrendQueryDto extends AnalyticsFreshQueryDto {
   @IsOptional()
   @IsIn(['daily', 'weekly', 'monthly'])
   period?: AnalyticsPeriod = 'monthly';

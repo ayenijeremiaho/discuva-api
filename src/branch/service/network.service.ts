@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { TenantVerificationStatus } from '../../tenant/enum/tenant-verification-status.enum';
 import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
@@ -114,6 +114,17 @@ export function branchAddress(rootSubdomain: string, label: string): string {
     .replace(/^-+|-+$/g, '');
   return `${rootSubdomain}-${slug}`.slice(0, 60).replace(/-+$/, '');
 }
+
+const TREE_FIELDS = {
+  id: true,
+  name: true,
+  subdomain: true,
+  parentTenantId: true,
+  networkLabel: true,
+  networkRootId: true,
+  isActive: true,
+  closedAt: true,
+} as const;
 
 @Injectable()
 export class NetworkService {
@@ -468,14 +479,24 @@ export class NetworkService {
       levels: number;
     }[]
   > {
-    const roots = await this.tenantRepo
-      .createQueryBuilder('t')
-      .select(['t.id', 't.name', 't.subdomain'])
-      .where('t.network_root_id = t.id')
-      .orderBy('t.name', 'ASC')
-      .getMany();
+    // Every networked church in one indexed read, then each network's tree in memory.
+    const rows = await this.tenantRepo.find({
+      where: { networkRootId: Not(IsNull()) },
+      select: TREE_FIELDS,
+    });
+    const roots = rows
+      .filter((r) => r.id === r.networkRootId)
+      .sort((a, b) => a.name.localeCompare(b.name));
     if (!roots.length) return [];
-    const trees = await Promise.all(roots.map((r) => this.loadTree(r.id)));
+    const byRoot = new Map<string, Tenant[]>();
+    for (const r of rows)
+      byRoot.set(r.networkRootId!, [
+        ...(byRoot.get(r.networkRootId!) ?? []),
+        r,
+      ]);
+    const trees = roots.map((r) =>
+      this.buildTree(r.id, byRoot.get(r.id) ?? []),
+    );
     return roots.map((r, i) => ({
       rootId: r.id,
       name: r.name,
@@ -608,17 +629,12 @@ export class NetworkService {
   async loadTree(rootId: string): Promise<Tree> {
     const rows = await this.tenantRepo.find({
       where: { networkRootId: rootId },
-      select: {
-        id: true,
-        name: true,
-        subdomain: true,
-        parentTenantId: true,
-        networkLabel: true,
-        networkRootId: true,
-        isActive: true,
-        closedAt: true,
-      },
+      select: TREE_FIELDS,
     });
+    return this.buildTree(rootId, rows);
+  }
+
+  private buildTree(rootId: string, rows: Tenant[]): Tree {
     const byId = new Map(rows.map((r) => [r.id, r]));
     const children = new Map<string, string[]>();
     for (const r of rows) {

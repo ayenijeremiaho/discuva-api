@@ -1,3 +1,4 @@
+import { TenantRollup } from '../../branch/entity/tenant-rollup.entity';
 import { ChurchDeletionService } from './church-deletion.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
@@ -39,6 +40,7 @@ const mockPlanRepo = {
   save: jest.fn(),
 };
 const mockOnboardingEventRepo = { find: jest.fn() };
+const mockRollupRepo = { find: jest.fn() };
 const mockDataSource = { query: jest.fn() };
 const mockProvisioningService = {
   ensurePendingTenant: jest.fn(),
@@ -85,6 +87,7 @@ describe('PlatformTenantService', () => {
         PlatformTenantService,
         { provide: getDataSourceToken(), useValue: mockDataSource },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        { provide: getRepositoryToken(TenantRollup), useValue: mockRollupRepo },
         {
           provide: getRepositoryToken(Subscription),
           useValue: mockSubscriptionRepo,
@@ -121,20 +124,18 @@ describe('PlatformTenantService', () => {
     service = module.get(PlatformTenantService);
   });
 
-  describe('listTenants', () => {
+  describe('getTenant (live health for one church)', () => {
     it('includes branding fields (logoUrl/tagline/address/supportEmail) alongside health stats', async () => {
-      mockTenantRepo.find.mockResolvedValue([baseTenant]);
-      mockSubscriptionRepo.find.mockResolvedValue([
-        {
-          tenantId: 'tenant-1',
-          planId: 'pro',
-          status: 'active',
-          planStartedAt: new Date('2026-09-17T10:00:00Z'),
-          currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
-          cancelAtPeriodEnd: false,
-          billingProviderSubscriptionId: 'SUB_123',
-        },
-      ]);
+      mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue({
+        tenantId: 'tenant-1',
+        planId: 'pro',
+        status: 'active',
+        planStartedAt: new Date('2026-09-17T10:00:00Z'),
+        currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
+        cancelAtPeriodEnd: false,
+        billingProviderSubscriptionId: 'SUB_123',
+      });
       mockDataSource.query.mockImplementation((sql: string) =>
         Promise.resolve(
           sql.includes('member_sessions')
@@ -151,41 +152,40 @@ describe('PlatformTenantService', () => {
         ),
       );
 
-      const result = await service.listTenants();
+      const result = await service.getTenant('tenant-1');
 
-      expect(result).toEqual([
-        {
-          id: 'tenant-1',
-          subdomain: 'test-church',
-          name: 'Test Church',
-          logoUrl: 'https://cdn.example.com/logo.png',
-          tagline: 'Growing together',
-          address: '1 Main St',
-          supportEmail: 'help@test-church.org',
-          currency: 'NGN',
-          timezone: 'Africa/Lagos',
-          isActive: true,
-          onboardingStatus: TenantOnboardingStatus.ACTIVE,
-          createdAt: baseTenant.createdAt,
-          planId: 'pro',
-          subscriptionStatus: 'active',
-          planStartedAt: new Date('2026-09-17T10:00:00Z'),
-          currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
-          cancelAtPeriodEnd: false,
-          autoRenews: true,
-          discountType: null,
-          discountValue: null,
-          discountReason: null,
-          discountExpiresAt: null,
-          memberCount: 5,
-          eventCount: 5,
-          adminCount: 2,
-          lastAdminSignInAt: new Date('2026-10-12T08:00:00Z'),
-          lastMemberSignInAt: new Date('2026-10-13T09:00:00Z'),
-          membersActiveLast30Days: 4,
-          lastEventOn: '2026-10-11',
-        },
-      ]);
+      expect(result).toEqual({
+        id: 'tenant-1',
+        subdomain: 'test-church',
+        name: 'Test Church',
+        logoUrl: 'https://cdn.example.com/logo.png',
+        tagline: 'Growing together',
+        address: '1 Main St',
+        supportEmail: 'help@test-church.org',
+        currency: 'NGN',
+        timezone: 'Africa/Lagos',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+        createdAt: baseTenant.createdAt,
+        planId: 'pro',
+        subscriptionStatus: 'active',
+        planStartedAt: new Date('2026-09-17T10:00:00Z'),
+        currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
+        cancelAtPeriodEnd: false,
+        autoRenews: true,
+        discountType: null,
+        discountValue: null,
+        discountReason: null,
+        discountExpiresAt: null,
+        memberCount: 5,
+        eventCount: 5,
+        adminCount: 2,
+        lastAdminSignInAt: new Date('2026-10-12T08:00:00Z'),
+        lastMemberSignInAt: new Date('2026-10-13T09:00:00Z'),
+        membersActiveLast30Days: 4,
+        lastEventOn: '2026-10-11',
+        lastActiveAt: null,
+      });
       expect(mockDataSource.query).toHaveBeenCalledWith(
         expect.stringContaining('"church_test_church".member_sessions'),
         ['ADMIN', 'MEMBER'],
@@ -193,8 +193,8 @@ describe('PlatformTenantService', () => {
     });
 
     it('shows a church nobody has signed into yet as never, not as an error', async () => {
-      mockTenantRepo.find.mockResolvedValue([baseTenant]);
-      mockSubscriptionRepo.find.mockResolvedValue([]);
+      mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
       mockDataSource.query.mockImplementation((sql: string) =>
         Promise.resolve(
           sql.includes('member_sessions')
@@ -211,7 +211,7 @@ describe('PlatformTenantService', () => {
         ),
       );
 
-      const [row] = await service.listTenants();
+      const row = await service.getTenant('tenant-1');
 
       expect(row).toMatchObject({
         adminCount: 1,
@@ -223,19 +223,84 @@ describe('PlatformTenantService', () => {
     });
 
     it('returns null counts when the schema query fails rather than throwing', async () => {
-      mockTenantRepo.find.mockResolvedValue([baseTenant]);
-      mockSubscriptionRepo.find.mockResolvedValue([]);
+      mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
       mockDataSource.query.mockRejectedValue(
         new Error('relation does not exist'),
       );
 
-      const result = await service.listTenants();
+      const result = await service.getTenant('tenant-1');
 
-      expect(result[0].memberCount).toBeNull();
-      expect(result[0].eventCount).toBeNull();
-      expect(result[0].lastAdminSignInAt).toBeNull();
-      expect(result[0].membersActiveLast30Days).toBeNull();
-      expect(result[0].planId).toBeNull();
+      expect(result.memberCount).toBeNull();
+      expect(result.eventCount).toBeNull();
+      expect(result.lastAdminSignInAt).toBeNull();
+      expect(result.membersActiveLast30Days).toBeNull();
+      expect(result.planId).toBeNull();
+    });
+  });
+
+  describe('listTenants (one page, shared tables only)', () => {
+    const qb = () => {
+      const q: Record<string, jest.Mock> = {};
+      for (const m of [
+        'andWhere',
+        'where',
+        'orderBy',
+        'addOrderBy',
+        'skip',
+        'take',
+      ])
+        q[m] = jest.fn(() => q);
+      q.getManyAndCount = jest.fn().mockResolvedValue([[baseTenant], 41]);
+      q.getCount = jest.fn().mockResolvedValue(3);
+      return q;
+    };
+
+    it('reads a page with filters in the database and never queries each church', async () => {
+      const list = qb();
+      const verify = qb();
+      (
+        mockTenantRepo as unknown as { createQueryBuilder: jest.Mock }
+      ).createQueryBuilder = jest
+        .fn()
+        .mockReturnValueOnce(list)
+        .mockReturnValueOnce(verify);
+      mockSubscriptionRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-1', planId: 'pro', status: 'active' },
+      ]);
+      mockRollupRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-1', memberCount: 120 },
+      ]);
+
+      const page = await service.listTenants({
+        page: 2,
+        limit: 25,
+        search: '50%',
+        status: 'active',
+        verification: 'to_verify',
+        plan: 'pro',
+      });
+
+      expect(page).toMatchObject({
+        page: 2,
+        limit: 25,
+        totalCount: 41,
+        totalPages: 2,
+        toVerifyCount: 3,
+      });
+      expect(page.data[0]).toMatchObject({
+        id: 'tenant-1',
+        planId: 'pro',
+        memberCount: 120,
+        adminCount: null,
+      });
+      expect(list.skip).toHaveBeenCalledWith(25);
+      expect(list.take).toHaveBeenCalledWith(25);
+      expect(list.andWhere).toHaveBeenCalledWith(
+        '(t.name ILIKE :like OR t.subdomain ILIKE :like)',
+        { like: '%50\\%%' },
+      );
+      expect(mockDataSource.query).not.toHaveBeenCalled();
     });
   });
 

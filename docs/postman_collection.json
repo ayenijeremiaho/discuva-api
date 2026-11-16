@@ -43957,16 +43957,110 @@
               ]
             },
             "url": {
-              "raw": "{{baseUrl}}/platform/tenants",
+              "raw": "{{baseUrl}}/platform/tenants?page=1&limit=25&search=&status=&verification=&plan=&orgType=",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "platform",
                 "tenants"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "25",
+                  "disabled": false
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "verification",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "plan",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "orgType",
+                  "value": "",
+                  "disabled": true
+                }
               ]
             },
-            "description": "List all tenants with plan/subscription status, live member/event counts and activity (adminCount, lastAdminSignInAt, lastMemberSignInAt, membersActiveLast30Days, lastEventOn)."
+            "description": "TENANTS_READ. One page of churches from shared tables only (no per-church queries). Returns { data, page, limit, totalCount, totalPages, toVerifyCount }. Live health is on GET /platform/tenants/:id."
+          },
+          "response": []
+        },
+        {
+          "name": "Look Up Tenants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/lookup?search=grace&ids=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "grace"
+                },
+                {
+                  "key": "ids",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "TENANTS_READ. Up to 20 churches by name or address (search) and/or names for chosen ids (ids, comma-separated)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant (live health)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "TENANTS_READ. One church with live health read from its own schema."
           },
           "response": []
         },

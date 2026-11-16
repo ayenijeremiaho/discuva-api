@@ -1,3 +1,7 @@
+import {
+  TenantListQueryDto,
+  TenantLookupQueryDto,
+} from '../dto/tenant-list-query.dto';
 import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
 import { SaveProtectedNameDto } from '../../protected-name/protected-name.dto';
@@ -11,6 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Query,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -286,8 +291,22 @@ export class PlatformAdminController {
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
   @Get('tenants')
-  async listTenants() {
-    return this.tenantService.listTenants();
+  async listTenants(@Query() query: TenantListQueryDto) {
+    return this.tenantService.listTenants(query);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenants/lookup')
+  lookupTenants(@Query() query: TenantLookupQueryDto) {
+    return this.tenantService.lookupTenants(query.search, query.ids);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenants/:id')
+  getTenant(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tenantService.getTenant(id);
   }
 
   @UseGuards(PlatformAdminGuard)
