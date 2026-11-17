@@ -152,6 +152,7 @@ export class ChildrenChurchAdminService {
         relations: ['member'],
         select: {
           id: true,
+          createdAt: true,
           fullName: true,
           relationship: true,
           phoneNumber: true,

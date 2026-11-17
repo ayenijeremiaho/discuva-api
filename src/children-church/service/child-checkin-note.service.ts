@@ -62,6 +62,7 @@ export class ChildCheckInNoteService {
         relations: ['member'],
         select: {
           id: true,
+          createdAt: true,
           fullName: true,
           relationship: true,
           isAuthorizedPickup: true,

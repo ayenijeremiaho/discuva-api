@@ -68,6 +68,7 @@ export class ChildCareService {
         relations: ['member'],
         select: {
           id: true,
+          createdAt: true,
           fullName: true,
           relationship: true,
           isAuthorizedPickup: true,
@@ -251,6 +252,7 @@ export class ChildCareService {
       relations: ['child', 'checkedInBy'],
       select: {
         id: true,
+        checkinTime: true,
         child: { id: true, firstname: true },
         checkedInBy: { id: true },
       },
@@ -268,7 +270,7 @@ export class ChildCareService {
         sharedWithParents: true,
       },
       relations: ['author'],
-      select: { id: true, author: { id: true } },
+      select: { id: true, createdAt: true, author: { id: true } },
       order: { createdAt: 'DESC' },
     });
     const note = await this.noteRepo.save(

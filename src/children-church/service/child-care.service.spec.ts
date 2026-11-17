@@ -285,6 +285,16 @@ describe('ChildCareService', () => {
 
     await service.reply(parent, 'c1', { text: 'Thank you for checking!' });
 
+    // Postgres rejects ordering by a field the query didn't select.
+    expect(checkInRepo.findOne.mock.calls[0][0].select).toHaveProperty(
+      'checkinTime',
+      true,
+    );
+    expect(noteRepo.findOne.mock.calls[0][0].select).toHaveProperty(
+      'createdAt',
+      true,
+    );
+
     expect(noteRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         fromParent: true,
