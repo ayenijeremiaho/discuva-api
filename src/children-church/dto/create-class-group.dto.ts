@@ -50,3 +50,10 @@ export class UpdateChildClassGroupDto {
   @IsOptional()
   childrenPerTeacher?: number | null;
 }
+
+export class SetRoomDutyDto {
+  // Left out or null: the front desk, every room.
+  @IsUUID('4')
+  @IsOptional()
+  classGroupId?: string | null;
+}

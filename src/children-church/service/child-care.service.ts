@@ -134,6 +134,7 @@ export class ChildCareService {
             receivedBy: personName(today.checkedInBy),
             handedBackBy: personName(today.checkedOutBy),
             serviceName: today.serviceSlot?.name ?? null,
+            stayingAllServices: today.stayingAllServices,
             pickupCode:
               me.isAuthorizedPickup &&
               today.status === ChildCheckInStatusEnum.CHECKED_IN
@@ -363,6 +364,25 @@ export class ChildCareService {
         ),
       ),
     ];
+  }
+
+  async setStaying(user: MemberAuth, childId: string, staying: boolean) {
+    await this.requireGuardian(user, childId);
+    const { start } = churchDay(await this.tz.get());
+    const active = await this.checkInRepo.findOne({
+      where: {
+        child: { id: childId },
+        status: ChildCheckInStatusEnum.CHECKED_IN,
+        checkinTime: MoreThanOrEqual(start),
+      },
+      select: { id: true, checkinTime: true },
+      order: { checkinTime: 'DESC' },
+    });
+    if (!active)
+      throw new BadRequestException(
+        'You can change this while your child is checked in.',
+      );
+    return this.children.setStaying(active.id, staying);
   }
 
   async requireGuardian(

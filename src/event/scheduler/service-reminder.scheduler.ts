@@ -129,6 +129,13 @@ export class ServiceReminderScheduler {
         .where('m.status = :status', { status: MemberStatusEnum.ACTIVE });
       scopeToAudience(qb, 'm', slot.event ?? {});
       scopeToAudience(qb, 'm', slot, 'slotAudience');
+      // Someone already at an earlier service of this event is staying on; don't remind them mid-service.
+      if (slot.event?.id) {
+        qb.andWhere(
+          'NOT EXISTS (SELECT 1 FROM attendances a WHERE a.member_id = m.id AND a.event_id = :eventId)',
+          { eventId: slot.event.id },
+        );
+      }
       const memberIds = (await qb.getMany()).map((m) => m.id);
       if (!memberIds.length) return;
       const multiple = slot.event?.name && slot.event.name !== slot.name;

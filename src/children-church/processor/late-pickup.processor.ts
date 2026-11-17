@@ -5,12 +5,13 @@ import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 import { ChildCheckIn } from '../entity/child-check-in.entity';
 import { ChildGuardian } from '../entity/child-guardian.entity';
+import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
@@ -20,7 +21,8 @@ export interface LatePickupJobData extends TenantJobEnvelope {
   slotId: string;
 }
 
-// Runs once per service slot, LATE_PICKUP_MINUTES after it ends.
+// Runs once per service slot, LATE_PICKUP_MINUTES after it ends. Children staying for
+// every service are only reminded after the event's last one.
 @Injectable()
 @Processor(CHILDREN_LATE_QUEUE)
 export class LatePickupProcessor {
@@ -31,6 +33,8 @@ export class LatePickupProcessor {
     private readonly checkInRepo: Repository<ChildCheckIn>,
     @InjectRepository(ChildGuardian)
     private readonly guardianRepo: Repository<ChildGuardian>,
+    @InjectRepository(ServiceSlot)
+    private readonly slotRepo: Repository<ServiceSlot>,
     private readonly push: PushNotificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
@@ -44,22 +48,44 @@ export class LatePickupProcessor {
   }
 
   async notify(slotId: string): Promise<number> {
-    const waiting = await this.checkInRepo.find({
-      where: {
-        serviceSlot: { id: slotId },
+    const eventSlots = await this.slotRepo
+      .createQueryBuilder('s')
+      .select(['s.id', 's.endTime'])
+      .where(
+        's.event_id = (SELECT x.event_id FROM service_slots x WHERE x.id = :slotId)',
+        { slotId },
+      )
+      .orderBy('s.endTime', 'DESC')
+      .getMany();
+    const isLast = !eventSlots.length || eventSlots[0].id === slotId;
+    const sameEvent = eventSlots.length
+      ? eventSlots.map((s) => s.id)
+      : [slotId];
+
+    const qb = this.checkInRepo
+      .createQueryBuilder('ci')
+      .innerJoin('ci.child', 'c')
+      .leftJoin('c.classGroup', 'cg')
+      .select(['ci.id', 'c.id', 'c.firstname', 'cg.id', 'cg.name'])
+      .where('ci.status = :status', {
         status: ChildCheckInStatusEnum.CHECKED_IN,
-        lateNotifiedAt: IsNull(),
-      },
-      relations: ['child', 'child.classGroup'],
-      select: {
-        id: true,
-        child: {
-          id: true,
-          firstname: true,
-          classGroup: { id: true, name: true },
-        },
-      },
-    });
+      })
+      .andWhere('ci.late_notified_at IS NULL')
+      .andWhere(
+        new Brackets((w) => {
+          w.where(
+            '(ci.service_slot_id = :slotId AND ci.staying_all_services = false)',
+            { slotId },
+          );
+          if (isLast) {
+            w.orWhere(
+              '(ci.staying_all_services = true AND ci.service_slot_id IN (:...sameEvent))',
+              { sameEvent },
+            );
+          }
+        }),
+      );
+    const waiting = await qb.getMany();
     if (!waiting.length) return 0;
 
     await this.checkInRepo.update(

@@ -8,6 +8,9 @@ export const CHILD_AGE_RANGES = [
 ] as const;
 export type ChildAgeRange = (typeof CHILD_AGE_RANGES)[number];
 
+// A church's own age group, kept in months so it ages the same way as the fixed ranges.
+export const monthsRange = (min: number, max: number) => `${min}-${max}m`;
+
 function monthsBetween(from: Date, to: Date): number {
   let months =
     (to.getFullYear() - from.getFullYear()) * 12 +
@@ -29,8 +32,11 @@ export function childAgeInMonths(
     return monthsBetween(new Date(child.dateOfBirth), today);
   }
   if (!child.ageRange || !child.ageRangeSetOn) return null;
-  const [min, max] = child.ageRange.split('-').map(Number);
-  const midpoint = Math.floor(((min + max + 1) * 12) / 2);
+  const inMonths = child.ageRange.endsWith('m');
+  const [min, max] = child.ageRange.replace('m', '').split('-').map(Number);
+  const midpoint = inMonths
+    ? Math.floor((min + max) / 2)
+    : Math.floor(((min + max + 1) * 12) / 2);
   return (
     midpoint + Math.max(0, monthsBetween(new Date(child.ageRangeSetOn), today))
   );

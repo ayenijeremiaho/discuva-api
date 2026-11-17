@@ -7,6 +7,7 @@ import { ChildProfile } from './entity/child-profile.entity';
 import { ChildGuardian } from './entity/child-guardian.entity';
 import { ChildCheckIn } from './entity/child-check-in.entity';
 import { ChildCheckInNote } from './entity/child-checkin-note.entity';
+import { ChildRoomDuty } from './entity/child-room-duty.entity';
 import { ServiceSlot } from '../event/entity/service-slot.entity';
 import { DepartmentLead } from '../department/entity/department-lead.entity';
 import { ChildrenChurchService } from './service/children-church.service';
@@ -14,6 +15,7 @@ import { ChildCareService } from './service/child-care.service';
 import { ChildCheckInNoteService } from './service/child-checkin-note.service';
 import { ChildrenChurchDashboardService } from './service/children-church-dashboard.service';
 import { ChildrenChurchAdminService } from './service/children-church-admin.service';
+import { ChildRoomService } from './service/child-room.service';
 import { LatePickupProcessor } from './processor/late-pickup.processor';
 import { ChildrenChurchCareController } from './controller/children-church-care.controller';
 import { ChildrenChurchController } from './controller/children-church.controller';
@@ -33,6 +35,7 @@ import { CHILDREN_LATE_QUEUE } from './children-church.constants';
       ChildGuardian,
       ChildCheckIn,
       ChildCheckInNote,
+      ChildRoomDuty,
       ServiceSlot,
       DepartmentLead,
     ]),
@@ -50,6 +53,7 @@ import { CHILDREN_LATE_QUEUE } from './children-church.constants';
     ChildCheckInNoteService,
     ChildrenChurchDashboardService,
     ChildrenChurchAdminService,
+    ChildRoomService,
     LatePickupProcessor,
   ],
   exports: [ChildrenChurchService],

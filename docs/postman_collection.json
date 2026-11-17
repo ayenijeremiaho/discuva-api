@@ -20282,6 +20282,414 @@
             "description": "CC-dept worker. Children with parents and link status, 20 per page, plus counts (total, linked, unlinked)."
           },
           "response": []
+        },
+        {
+          "name": "Register Child (church age group)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children"
+              ]
+            },
+            "description": "Registers with one of the church's own age groups instead of a date of birth; stored as that group's month range.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"Mira\",\n  \"lastname\": \"Okafor\",\n  \"ageGroupId\": \"{{ageGroupId}}\",\n  \"guardians\": [\n    {\n      \"fullName\": \"Adaeze Okafor\",\n      \"relationship\": \"MOTHER\",\n      \"memberId\": \"{{memberId}}\",\n      \"isAuthorizedPickup\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Check In Child (staying for all services)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/checkin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "checkin"
+              ]
+            },
+            "description": "stayingAllServices left out uses the child's last choice.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"childId\": \"{{childId}}\",\n  \"serviceSlotId\": \"{{serviceSlotId}}\",\n  \"droppedOffByGuardianId\": \"{{guardianId}}\",\n  \"stayingAllServices\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set Staying (team)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/checkin/{{checkInId}}/staying",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "checkin",
+                "{{checkInId}}",
+                "staying"
+              ]
+            },
+            "description": "Team. Late-pickup reminder waits for the event's last service when on.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staying\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set My Child Staying (guardian)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/children/mine/{{childId}}/staying",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "children",
+                "mine",
+                "{{childId}}",
+                "staying"
+              ]
+            },
+            "description": "Guardian of the child, while it is checked in today.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staying\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My Room Today",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/duty",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "duty"
+              ]
+            },
+            "description": "Team. Null duty the first time; after that the last pick carries over (remembered: true)."
+          },
+          "response": []
+        },
+        {
+          "name": "Set My Room Today",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/duty",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "duty"
+              ]
+            },
+            "description": "Team. classGroupId null = front desk.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classGroupId\": \"{{classGroupId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Groups & Rooms (setup)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup"
+              ]
+            },
+            "description": "HOD / deputy HOD. Age groups with rooms and counts, plus toMove."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Age Group (HOD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/age-groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "age-groups"
+              ]
+            },
+            "description": "HOD / deputy HOD. Overlapping ages are refused.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cr\\u00e8che\",\n  \"minAgeMonths\": 0,\n  \"maxAgeMonths\": 17\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Age Group (HOD)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/age-groups/{{ageGroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "age-groups",
+                "{{ageGroupId}}"
+              ]
+            },
+            "description": "HOD / deputy HOD.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minAgeMonths\": 0,\n  \"maxAgeMonths\": 23\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Age Group (HOD)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/age-groups/{{ageGroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "age-groups",
+                "{{ageGroupId}}"
+              ]
+            },
+            "description": "HOD / deputy HOD. Refused while children are in it."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Room (HOD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/rooms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "rooms"
+              ]
+            },
+            "description": "HOD / deputy HOD.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ageGroupId\": \"{{ageGroupId}}\",\n  \"name\": \"Preschool B\",\n  \"capacity\": 25,\n  \"childrenPerTeacher\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Room (HOD)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/rooms/{{classGroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "rooms",
+                "{{classGroupId}}"
+              ]
+            },
+            "description": "HOD / deputy HOD.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 30\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Room (HOD)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/rooms/{{classGroupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "rooms",
+                "{{classGroupId}}"
+              ]
+            },
+            "description": "HOD / deputy HOD. Refused while children are assigned."
+          },
+          "response": []
+        },
+        {
+          "name": "Move Children to Fitting Groups (HOD)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/children-church/setup/regroup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "children-church",
+                "setup",
+                "regroup"
+              ]
+            },
+            "description": "HOD / deputy HOD. Runs the existing regroup once."
+          },
+          "response": []
         }
       ]
     },

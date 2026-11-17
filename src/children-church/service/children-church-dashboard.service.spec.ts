@@ -35,8 +35,6 @@ const row = (o: Partial<Record<string, unknown>>) => ({
   id: 'ci',
   status: ChildCheckInStatusEnum.CHECKED_IN,
   checkedInById: 't1',
-  teacherFirstname: 'Funmi',
-  teacherLastname: 'Lawal',
   lateNotifiedAt: null,
   flagReason: null,
   childFirstname: 'Tobi',
@@ -52,6 +50,8 @@ function setup(opts: {
   days?: unknown[];
   dayTeachers?: unknown[];
   slots?: unknown[];
+  duties?: unknown[];
+  present?: unknown[];
 }) {
   const checkInRepo: any = {
     createQueryBuilder: jest
@@ -59,7 +59,11 @@ function setup(opts: {
       .mockReturnValueOnce(chain({ raw: opts.rows ?? [] }))
       .mockReturnValueOnce(chain({ raw: opts.days ?? [] }))
       .mockReturnValueOnce(chain({ raw: opts.dayTeachers ?? [] })),
-    query: jest.fn().mockResolvedValue([{ n: 9 }]),
+    query: jest.fn((sql: string) =>
+      Promise.resolve(
+        sql.includes('attendances') ? (opts.present ?? []) : [{ n: 9 }],
+      ),
+    ),
   };
   const classGroupRepo: any = {
     find: jest.fn().mockResolvedValue([
@@ -105,11 +109,21 @@ function setup(opts: {
     childRepo,
     leadRepo,
     slotRepo,
+    {
+      createQueryBuilder: jest.fn(() => chain({ raw: opts.duties ?? [] })),
+    } as any,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as any,
     cache,
   );
   return { service, cache };
 }
+
+const duty = (
+  memberId: string,
+  classGroupId: string | null,
+  firstname: string,
+  lastname: string,
+) => ({ memberId, classGroupId, firstname, lastname });
 
 const minutes = (m: number) => new Date(Date.now() + m * 60_000);
 
@@ -126,12 +140,19 @@ describe('ChildrenChurchDashboardService', () => {
       row({
         id: `p${i}`,
         checkedInById: i % 2 ? 't1' : 't2',
-        teacherFirstname: i % 2 ? 'Funmi' : 'Ola',
-        teacherLastname: i % 2 ? 'Lawal' : 'Martins',
       }),
     );
     const { service, cache } = setup({
       lead: true,
+      // t5 picked Preschool last week and it carried over, but isn't here today.
+      duties: [
+        duty('t1', 'pre', 'Funmi', 'Lawal'),
+        duty('t2', 'pre', 'Ola', 'Martins'),
+        duty('t3', 'jun', 'Ada', 'Bell'),
+        duty('t4', null, 'Kemi', 'Obi'),
+        duty('t5', 'pre', 'Sam', 'Eze'),
+      ],
+      present: [{ memberId: 't1' }, { memberId: 't4' }],
       slots: [
         {
           id: 's1',
@@ -152,8 +173,6 @@ describe('ChildrenChurchDashboardService', () => {
           id: 'late',
           lateNotifiedAt: new Date(),
           checkedInById: 't2',
-          teacherFirstname: 'Ola',
-          teacherLastname: 'Martins',
         }),
         row({
           id: 'out',
@@ -161,8 +180,6 @@ describe('ChildrenChurchDashboardService', () => {
           classGroupId: 'jun',
           classGroupName: 'Juniors',
           checkedInById: 't3',
-          teacherFirstname: 'Ada',
-          teacherLastname: 'Bell',
         }),
         row({
           id: 'flag',
@@ -171,8 +188,6 @@ describe('ChildrenChurchDashboardService', () => {
           classGroupId: 'jun',
           classGroupName: 'Juniors',
           checkedInById: 't3',
-          teacherFirstname: 'Ada',
-          teacherLastname: 'Bell',
         }),
       ],
     });
@@ -182,7 +197,8 @@ describe('ChildrenChurchDashboardService', () => {
     expect(d.service.next).toMatchObject({ name: 'Second service' });
     expect(d.childrenInNow).toBe(14);
     expect(d.checkedInToday).toBe(16);
-    expect(d.teachersOnDuty).toBe(3);
+    expect(d.teachersOnDuty).toBe(4);
+    expect(d.atFrontDesk).toEqual(['Kemi']);
     expect(d.collected).toBe(1);
     expect(d.rooms.find((r) => r.id === 'pre')).toMatchObject({
       children: 14,
@@ -190,7 +206,7 @@ describe('ChildrenChurchDashboardService', () => {
       teachers: 2,
       teachersNeeded: 3,
       needsTeacher: true,
-      teacherInitials: ['OM', 'FL'],
+      teacherInitials: ['FL', 'OM'],
     });
     expect(d.rooms.find((r) => r.id === 'jun')).toMatchObject({
       children: 0,
@@ -210,6 +226,21 @@ describe('ChildrenChurchDashboardService', () => {
     expect(d.awayToday).toBe(3);
     expect(d.unlinkedChildren).toBe(4);
     expect(cache.set).toHaveBeenCalledWith('k', d, 60);
+  });
+
+  it("trusts room picks alone when the church doesn't record worker attendance", async () => {
+    const { service } = setup({
+      lead: true,
+      rows: [row({ checkedInById: null })],
+      duties: [
+        duty('t1', 'pre', 'Funmi', 'Lawal'),
+        duty('t2', null, 'Ola', 'Martins'),
+      ],
+    });
+    const d = await service.today({ id: 'hod' } as any);
+    expect(d.teachersOnDuty).toBe(2);
+    expect(d.rooms.find((r) => r.id === 'pre')).toMatchObject({ teachers: 1 });
+    expect(d.atFrontDesk).toEqual(['Ola']);
   });
 
   it('on a quiet day: next service, last Sunday, teachers to plan per room and this month', async () => {

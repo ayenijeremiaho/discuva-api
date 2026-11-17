@@ -39,6 +39,18 @@ import {
   UpdateChildCareDto,
 } from '../dto/child-care.dto';
 import { CreateGuardianDto } from '../dto/create-guardian.dto';
+import { SetStayingDto } from '../dto/child-check-in.dto';
+import {
+  CreateChildClassGroupDto,
+  SetRoomDutyDto,
+  UpdateChildClassGroupDto,
+} from '../dto/create-class-group.dto';
+import {
+  CreateChildAgeGroupDto,
+  UpdateChildAgeGroupDto,
+} from '../dto/create-age-group.dto';
+import { ChildRoomService } from '../service/child-room.service';
+import { ChildrenChurchService } from '../service/children-church.service';
 
 const CHILD_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -51,6 +63,8 @@ export class ChildrenChurchCareController {
     private readonly notes: ChildCheckInNoteService,
     private readonly dashboard: ChildrenChurchDashboardService,
     private readonly admin: ChildrenChurchAdminService,
+    private readonly rooms: ChildRoomService,
+    private readonly children: ChildrenChurchService,
   ) {}
 
   // ─── Parents and guardians ────────────────────────────────────────────────
@@ -96,6 +110,16 @@ export class ChildrenChurchCareController {
   @Delete('children/mine/:id/away')
   clearAway(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.care.clearAway(req.user, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('children/mine/:id/staying')
+  setMyChildStaying(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetStayingDto,
+  ) {
+    return this.care.setStaying(req.user, id, dto.staying);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -146,6 +170,32 @@ export class ChildrenChurchCareController {
     return this.notes.add(req.user, id, dto);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Patch('checkin/:id/staying')
+  async setStaying(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetStayingDto,
+  ) {
+    await this.notes.requireTeam(req.user);
+    return this.children.setStaying(id, dto.staying);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('duty')
+  myDuty(@Request() req: any) {
+    return this.rooms.myDuty(req.user);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Put('duty')
+  setDuty(@Request() req: any, @Body() dto: SetRoomDutyDto) {
+    return this.rooms.setDuty(req.user, dto.classGroupId ?? null);
+  }
+
   // ─── HOD and deputy ───────────────────────────────────────────────────────
 
   @UseGuards(JwtAuthGuard)
@@ -158,6 +208,62 @@ export class ChildrenChurchCareController {
   @Get('dashboard/today')
   today(@Request() req: any) {
     return this.dashboard.today(req.user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('setup')
+  setup(@Request() req: any) {
+    return this.rooms.setup(req.user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('setup/age-groups')
+  addGroup(@Request() req: any, @Body() dto: CreateChildAgeGroupDto) {
+    return this.rooms.addGroup(req.user, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('setup/age-groups/:id')
+  updateGroup(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateChildAgeGroupDto,
+  ) {
+    return this.rooms.updateGroup(req.user, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('setup/age-groups/:id')
+  deleteGroup(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.rooms.deleteGroup(req.user, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('setup/rooms')
+  addRoom(@Request() req: any, @Body() dto: CreateChildClassGroupDto) {
+    return this.rooms.addRoom(req.user, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('setup/rooms/:id')
+  updateRoom(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateChildClassGroupDto,
+  ) {
+    return this.rooms.updateRoom(req.user, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('setup/rooms/:id')
+  deleteRoom(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    return this.rooms.deleteRoom(req.user, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('setup/regroup')
+  regroup(@Request() req: any) {
+    return this.rooms.regroup(req.user);
   }
 
   // ─── Admin portal ─────────────────────────────────────────────────────────

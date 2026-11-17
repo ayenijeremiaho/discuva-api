@@ -87,6 +87,15 @@ describe('ServiceReminderScheduler', () => {
     });
   });
 
+  it('skips anyone already checked in to an earlier service of the same event', async () => {
+    inReach = [slot('s1', 1.9)];
+    await scheduler.runReminders(now);
+    expect(memberQb.andWhere).toHaveBeenCalledWith(
+      'NOT EXISTS (SELECT 1 FROM attendances a WHERE a.member_id = m.id AND a.event_id = :eventId)',
+      { eventId: 'e-s1' },
+    );
+  });
+
   it('sends the 2-hour reminder separately, and names a single-service event once', async () => {
     inReach = [slot('s1', 1.9, 'Sunday Service')];
     await scheduler.runReminders(now);

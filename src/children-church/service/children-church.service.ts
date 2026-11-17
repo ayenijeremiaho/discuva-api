@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { ChildAgeGroup } from '../entity/child-age-group.entity';
 import { ChildClassGroup } from '../entity/child-class-group.entity';
 import { ChildProfile } from '../entity/child-profile.entity';
@@ -37,7 +37,7 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { randomBytes } from 'node:crypto';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
-import { childAgeInMonths } from '../child-age.util';
+import { childAgeInMonths, monthsRange } from '../child-age.util';
 import { MemberService } from '../../member/service/member.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -87,6 +87,7 @@ export class ChildrenChurchService {
         'minAgeMonths must be less than maxAgeMonths',
       );
     }
+    await this.assertNoOverlap(dto.minAgeMonths, dto.maxAgeMonths);
     const entity = this.ageGroupRepo.create({
       name: dto.name,
       minAgeMonths: dto.minAgeMonths,
@@ -113,7 +114,30 @@ export class ChildrenChurchService {
       throw new BadRequestException(
         'minAgeMonths must be less than maxAgeMonths',
       );
+    if (dto.minAgeMonths !== undefined || dto.maxAgeMonths !== undefined)
+      await this.assertNoOverlap(min, max, id);
     return this.ageGroupRepo.save(entity);
+  }
+
+  // A child of any age must land in exactly one group.
+  private async assertNoOverlap(
+    min: number,
+    max: number,
+    exceptId?: string,
+  ): Promise<void> {
+    const clash = await this.ageGroupRepo.findOne({
+      where: {
+        minAgeMonths: LessThanOrEqual(max),
+        maxAgeMonths: MoreThanOrEqual(min),
+        ...(exceptId ? { id: Not(exceptId) } : {}),
+      },
+      select: { id: true, name: true },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `These ages overlap with ${clash.name}. Change one so each age fits one group.`,
+      );
+    }
   }
 
   async deleteAgeGroup(id: string): Promise<void> {
@@ -217,7 +241,7 @@ export class ChildrenChurchService {
   ): Promise<ChildProfile> {
     await this.requireChildrenChurchAuth(user);
     this.logger.log(`Registering child: ${dto.firstname} ${dto.lastname}`);
-    const age = this.ageFields(dto);
+    const age = this.ageFields(await this.withGroupRange(dto));
     const guardians = this.uniqueGuardians(dto.guardians ?? []);
     const { ageGroup, classGroup } = await this.computeAgeGroup(age);
     return this.childProfileRepo.manager.transaction(async (m) => {
@@ -263,8 +287,12 @@ export class ChildrenChurchService {
     if (dto.photoUrl !== undefined) entity.photoUrl = dto.photoUrl ?? null;
     if (dto.specialNotes !== undefined)
       entity.specialNotes = dto.specialNotes ?? null;
-    if (dto.dateOfBirth !== undefined || dto.ageRange !== undefined) {
-      Object.assign(entity, this.ageFields(dto));
+    if (
+      dto.dateOfBirth !== undefined ||
+      dto.ageRange !== undefined ||
+      dto.ageGroupId !== undefined
+    ) {
+      Object.assign(entity, this.ageFields(await this.withGroupRange(dto)));
       const { ageGroup, classGroup } = await this.computeAgeGroup(entity);
       entity.ageGroup = ageGroup;
       entity.classGroup = classGroup;
@@ -596,6 +624,7 @@ export class ChildrenChurchService {
     }
 
     const pickupCode = await this.generateUniquePickupCode();
+    const staying = dto.stayingAllServices ?? child.staysAllServices;
 
     const entity = this.checkInRepo.create({
       child,
@@ -610,14 +639,61 @@ export class ChildrenChurchService {
       checkinTime: new Date(),
       pickupCode,
       status: ChildCheckInStatusEnum.CHECKED_IN,
+      stayingAllServices: staying,
     });
     const saved = await this.checkInRepo.save(entity);
+    if (staying !== child.staysAllServices) {
+      this.childProfileRepo
+        .update(child.id, { staysAllServices: staying })
+        .catch((err) =>
+          this.logger.error(`Staying choice not kept: ${err.message}`),
+        );
+    }
     if (dto.serviceSlotId) {
-      this.scheduleLatePickup(dto.serviceSlotId).catch((err) =>
+      this.schedulePickupReminders(dto.serviceSlotId, staying).catch((err) =>
         this.logger.error(`Late pickup job not scheduled: ${err.message}`),
       );
     }
     return saved;
+  }
+
+  async setStaying(checkInId: string, staying: boolean) {
+    const ci = await this.checkInRepo.findOne({
+      where: { id: checkInId, status: ChildCheckInStatusEnum.CHECKED_IN },
+      relations: ['child', 'serviceSlot'],
+      select: { id: true, child: { id: true }, serviceSlot: { id: true } },
+    });
+    if (!ci) throw new NotFoundException('This child is not checked in');
+    await Promise.all([
+      this.checkInRepo.update(ci.id, { stayingAllServices: staying }),
+      this.childProfileRepo.update(ci.child.id, { staysAllServices: staying }),
+    ]);
+    if (ci.serviceSlot) {
+      this.schedulePickupReminders(ci.serviceSlot.id, staying).catch((err) =>
+        this.logger.error(`Late pickup job not scheduled: ${err.message}`),
+      );
+    }
+    return { id: ci.id, stayingAllServices: staying };
+  }
+
+  // Children staying for every service are reminded after the event's last service, not this one.
+  private async schedulePickupReminders(
+    slotId: string,
+    staying: boolean,
+  ): Promise<void> {
+    await this.scheduleLatePickup(slotId);
+    if (!staying) return;
+    const last = await this.slotRepo
+      .createQueryBuilder('s')
+      .select(['s.id', 's.endTime'])
+      .where(
+        's.event_id = (SELECT x.event_id FROM service_slots x WHERE x.id = :slotId)',
+        { slotId },
+      )
+      .orderBy('s.endTime', 'DESC')
+      .limit(1)
+      .getOne();
+    if (last && last.id !== slotId) await this.scheduleLatePickup(last.id);
   }
 
   // One delayed job per service slot; the fixed jobId means later check-ins don't add more.
@@ -903,6 +979,22 @@ export class ChildrenChurchService {
       seen.add(g.memberId);
       return true;
     });
+  }
+
+  // A chosen church age group becomes its month range, so the child ages out of it like any other.
+  private async withGroupRange<
+    T extends { dateOfBirth?: string; ageRange?: string; ageGroupId?: string },
+  >(dto: T): Promise<T> {
+    if (dto.dateOfBirth || !dto.ageGroupId) return dto;
+    const group = await this.ageGroupRepo.findOne({
+      where: { id: dto.ageGroupId },
+      select: { id: true, minAgeMonths: true, maxAgeMonths: true },
+    });
+    if (!group) throw new NotFoundException('Age group not found');
+    return {
+      ...dto,
+      ageRange: monthsRange(group.minAgeMonths, group.maxAgeMonths),
+    };
   }
 
   // Exactly one of date of birth or age range is kept; a date of birth wins if both are sent.

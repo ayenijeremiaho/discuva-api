@@ -82,6 +82,7 @@ export class ChildCheckInNoteService {
       checkoutTime: ci.checkoutTime,
       pickupCode: ci.pickupCode,
       flagReason: ci.flagReason,
+      stayingAllServices: ci.stayingAllServices,
       serviceName: ci.serviceSlot?.name ?? null,
       droppedOffBy: ci.droppedOffBy
         ? {

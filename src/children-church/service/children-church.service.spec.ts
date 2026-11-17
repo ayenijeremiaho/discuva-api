@@ -26,7 +26,7 @@ import { ClsService } from 'nestjs-cls';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { CHILDREN_LATE_QUEUE } from '../children-church.constants';
 
-const mockSlotRepo = { findOne: jest.fn() };
+const mockSlotRepo: any = { findOne: jest.fn(), createQueryBuilder: jest.fn() };
 const mockLateQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
 const mockAgeGroupRepo = {
@@ -1130,6 +1130,138 @@ describe('ChildrenChurchService', () => {
         service.searchMembersForGuardian(adminUser, 'ada'),
       ).rejects.toThrow(ForbiddenException);
       expect(mockMemberService.searchActiveMembersLite).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Church age groups, overlaps and staying for every service ────────────
+
+  describe('age groups', () => {
+    it('refuses ages that overlap another group', async () => {
+      mockAgeGroupRepo.findOne.mockResolvedValue({
+        id: 'ag-2',
+        name: 'Toddlers',
+      });
+      await expect(
+        service.createAgeGroup({
+          name: 'Crèche',
+          minAgeMonths: 0,
+          maxAgeMonths: 30,
+        }),
+      ).rejects.toThrow('These ages overlap with Toddlers');
+    });
+
+    it("doesn't check overlaps when only the name changes", async () => {
+      mockAgeGroupRepo.findOne.mockResolvedValueOnce({ ...mockAgeGroup });
+      mockAgeGroupRepo.save.mockImplementation((e) => Promise.resolve(e));
+      await service.updateAgeGroup('ag-1', { name: 'Crèche' });
+      expect(mockAgeGroupRepo.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("registers with one of the church's age groups as a month range", async () => {
+      mockAgeGroupRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'ag-1',
+          minAgeMonths: 0,
+          maxAgeMonths: 17,
+        })
+        .mockResolvedValue(mockAgeGroup);
+      mockClassGroupRepo.find.mockResolvedValue([mockClassGroup]);
+      mockChildProfileRepo.count.mockResolvedValue(0);
+      mockChildProfileRepo.create.mockImplementation((v) => v);
+      mockChildProfileRepo.save.mockImplementation((v) => Promise.resolve(v));
+      await service.registerChild(adminUser, {
+        firstname: 'Mira',
+        lastname: 'Okafor',
+        ageGroupId: 'ag-1',
+      });
+      expect(mockChildProfileRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ ageRange: '0-17m', dateOfBirth: null }),
+      );
+    });
+  });
+
+  describe('staying for every service', () => {
+    const lastSlot = (id: string) => {
+      const qb: any = {};
+      for (const m of ['select', 'where', 'orderBy', 'limit'])
+        qb[m] = jest.fn(() => qb);
+      qb.getOne = jest.fn().mockResolvedValue({ id, endTime: new Date() });
+      mockSlotRepo.createQueryBuilder.mockReturnValue(qb);
+    };
+
+    beforeEach(() => {
+      mockCheckInRepo.findOne.mockResolvedValue(null);
+      mockCheckInRepo.existsBy.mockResolvedValue(false);
+      mockCheckInRepo.create.mockImplementation((v) => v);
+      mockCheckInRepo.save.mockImplementation((v) => Promise.resolve(v));
+      mockSlotRepo.findOne.mockImplementation(({ where }: any) =>
+        Promise.resolve({
+          id: where.id,
+          endTime: new Date(Date.now() + 3600_000),
+        }),
+      );
+      (mockChildProfileRepo as any).update = jest.fn().mockResolvedValue({});
+      (mockCheckInRepo as any).update = jest.fn().mockResolvedValue({});
+      lastSlot('slot-3');
+    });
+
+    it("starts with the child's choice from last time", async () => {
+      mockChildProfileRepo.findOne.mockResolvedValue({
+        ...mockChild,
+        staysAllServices: true,
+      });
+      await service.checkIn(adminUser, {
+        childId: 'child-1',
+        serviceSlotId: 'slot-1',
+      });
+      await new Promise((r) => setImmediate(r));
+      expect(mockCheckInRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ stayingAllServices: true }),
+      );
+      const jobs = mockLateQueue.add.mock.calls.map((c) => c[1].slotId);
+      expect(jobs).toEqual(['slot-1', 'slot-3']);
+    });
+
+    it('remembers a changed choice on the child for next time', async () => {
+      mockChildProfileRepo.findOne.mockResolvedValue({
+        ...mockChild,
+        staysAllServices: false,
+      });
+      await service.checkIn(adminUser, {
+        childId: 'child-1',
+        serviceSlotId: 'slot-1',
+        stayingAllServices: true,
+      });
+      expect((mockChildProfileRepo as any).update).toHaveBeenCalledWith(
+        'child-1',
+        {
+          staysAllServices: true,
+        },
+      );
+    });
+
+    it('switching it on later keeps the choice and books the reminder after the last service', async () => {
+      mockCheckInRepo.findOne.mockResolvedValue({
+        id: 'ci-1',
+        child: { id: 'child-1' },
+        serviceSlot: { id: 'slot-1' },
+      });
+      const r = await service.setStaying('ci-1', true);
+      await new Promise((res) => setImmediate(res));
+      expect(r).toEqual({ id: 'ci-1', stayingAllServices: true });
+      expect((mockCheckInRepo as any).update).toHaveBeenCalledWith('ci-1', {
+        stayingAllServices: true,
+      });
+      expect(mockLateQueue.add.mock.calls.map((c) => c[1].slotId)).toContain(
+        'slot-3',
+      );
+    });
+
+    it('can only be changed while the child is checked in', async () => {
+      mockCheckInRepo.findOne.mockResolvedValue(null);
+      await expect(service.setStaying('ci-1', true)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

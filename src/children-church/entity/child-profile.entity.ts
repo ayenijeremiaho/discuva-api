@@ -35,6 +35,10 @@ export class ChildProfile extends BaseEntity {
   @Column({ type: 'date', nullable: true })
   ageRangeSetOn: string | null;
 
+  // Last choice on check-in, so regulars who stay for every service start with it on.
+  @Column({ default: false })
+  staysAllServices: boolean;
+
   @Column({ nullable: true })
   photoUrl: string | null;
 

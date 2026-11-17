@@ -245,7 +245,9 @@ Settings) at the hours in Reminder Settings → **Service Reminders** (`Reminder
 before the service, default `[24, 2]`, on unless the church turns it off). Recipients are active members in the
 service's audience (event and slot audience, as check-in uses); push only, since an email to every member before
 every service would be noise and use the church's email allowance. A service with its own enabled reminders
-(`event_reminders`, admin-set) gets only those (`NOT EXISTS`, indexed `service_slot_id`). Each threshold goes out once
+(`event_reminders`, admin-set) gets only those (`NOT EXISTS`, indexed `service_slot_id`). Anyone already checked in to
+the same event (an earlier service that day; attendance is one row per member per event) is left out, so people staying
+for every service aren't reminded mid-service (`NOT EXISTS` on the unique `(member_id, event_id)` index). Each threshold goes out once
 per service (Redis key set before sending, plus the push idempotency key), if the run is within an hour of its time;
 otherwise it's skipped. `service_name` is "Event · Service" when they differ; `time_until` reads "1 day" or "2 hours";
 the push opens `/events/{eventId}`. The job sleeps until the next reminder is due, or until the next service comes
@@ -6789,10 +6791,13 @@ Provides a security-grade check-in/check-out system for children. Key features:
 - **My Children** (`GET /children-church/children/mine`) lists children the caller is a guardian of, each with `inClassNow` and `lastVisit` (one extra grouped query on `child_check_ins` by `child_id`). A child can have several guardians; every one linked to a member account sees the child.
 - **Parent view** (`GET /children-church/children/mine/:id`, guardian only, else 404) returns the child, guardians (name, relationship, `isAuthorizedPickup`, `isMe` — no contact details), today's visit (church-local day; `receivedBy`/`handedBackBy` teacher names; `pickupCode` only for a guardian who can collect and only while `CHECKED_IN`), today's notes shared with parents (opening marks unseen teacher notes `parentSeenAt`/`parentSeenBy`), and today's away message.
 - Parents can edit date of birth, special notes (array, stored one per line; changes set `notesUpdatedBy`/`notesUpdatedAt` so the team sees "Updated by parent"), emergency contact and doctor (`PATCH /children-church/children/mine/:id`), upload a photo (`POST …/photo`, multipart `file`, images up to 5 MB, Cloudinary `child-photos`), set or clear today's away message naming a guardian who can collect (`PUT`/`DELETE …/away`; it counts only on `awayDate`, so it clears itself), and reply to today's notes (`POST …/notes`; needs a check-in today; pushes `CHILD_NOTE_REPLY` to the teacher who checked the child in and every teacher who wrote a note on that visit).
-- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit, family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
+- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit (with `stayingAllServices`), family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
 - **Who handled the child**: `checkedInBy` was already saved; check-out now saves `checkedOutBy`. Both show on visits for the team, admins and parents (names only).
 - **Late pickup**: checking a child into a service slot schedules one Bull delayed job per slot (`children-church-late` queue, `jobId cc-late:<tenantId>:<slotId>`, so later check-ins add nothing) for 20 minutes after the slot's `endTime`. It marks still-checked-in visits `lateNotifiedAt` and pushes `CHILD_LATE_PICKUP` to their guardians who can collect. No scanning.
-- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (distinct `checkedInBy` today), collected, rooms (children in now, teachers who checked children into that class today, `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), late pickups, flagged visits, today's parent note changes, away messages, this month's Sundays (children per Sunday), new children and children not seen for 3+ weeks (last visit 21–90 days ago). Also: `service.live` / `service.next` (the service slot running now, else the next within 14 days; indexed on start/end time), `lastDay` (the last service day before today: children, distinct teachers, last collection time), `plan` per room (usual children from that day and `teachersNeeded` from `childrenPerTeacher`), `teachersToPlan`, `unlinkedChildren` (no guardian linked to the app), room `capacity` and `teacherInitials`. Last-day and plan numbers come from two grouped queries over the last 35 days on the indexed `checkin_time`. Cached in Redis for 60 s per church-day.
+- **Staying for all services** (2026-11-17): `ChildCheckIn.stayingAllServices`. Check-in takes `stayingAllServices`; left out, it uses `ChildProfile.staysAllServices` (the child's last choice), and a different choice is saved back to the profile. The team can change it on a visit (`PATCH /children-church/checkin/:id/staying` `{ staying }`), and so can any guardian of the child while it is checked in today (`PUT /children-church/children/mine/:id/staying`). When on, the late-pickup job is also booked for the event's last slot (same fixed jobId pattern). A slot's job reminds only children in that slot who aren't staying; the event's last slot also reminds children staying from any of its slots. `today.stayingAllServices` is on the parent view and `staysAllServices` on roster rows.
+- **Room for today** (2026-11-17): `GET /children-church/duty` (team) returns `duty` (`classGroupId`, `roomName`, `frontDesk`, `remembered`), every room with its age group's months and the first names of teammates in it today, and `atFrontDesk`. The first time `duty` is null and the app asks once; after that the last pick is copied to today (one upsert) and shown as remembered. `PUT /children-church/duty` `{ classGroupId }` (null = front desk) changes it. Both clear the dashboard cache for the day.
+- **Groups & rooms for the HOD** (2026-11-17): `GET /children-church/setup` (HOD / deputy only) returns age groups (months, children) with their rooms (places, children per teacher, children) from one grouped count, plus `toMove`: children whose age now puts them in a different group. `POST|PATCH|DELETE /children-church/setup/age-groups[/:id]`, `POST|PATCH|DELETE /children-church/setup/rooms[/:id]` and `POST /children-church/setup/regroup` reuse the admin rules: deleting a group or room is refused while children are in it, and overlapping ages are refused (admin and HOD alike) with "These ages overlap with …". Registering can take `ageGroupId` instead of a date of birth or fixed range; it is stored as that group's month range.
+- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (Children's Church workers with worker attendance today, plus anyone who checked a child in, plus room picks; one indexed query on `attendances.checkin_time`), collected, rooms (children in now, teachers who picked that room today and are present (a carried-over pick alone doesn't count unless the church records no worker attendance that day), `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), `atFrontDesk` (first names), late pickups, flagged visits, today's parent note changes, away messages, this month's Sundays (children per Sunday), new children and children not seen for 3+ weeks (last visit 21–90 days ago). Also: `service.live` / `service.next` (the service slot running now, else the next within 14 days; indexed on start/end time), `lastDay` (the last service day before today: children, distinct teachers, last collection time), `plan` per room (usual children from that day and `teachersNeeded` from `childrenPerTeacher`), `teachersToPlan`, `unlinkedChildren` (no guardian linked to the app), room `capacity` and `teacherInitials`. Last-day and plan numbers come from two grouped queries over the last 35 days on the indexed `checkin_time`. Cached in Redis for 60 s per church-day.
 - **Admin**: `GET /children-church/admin/children` (paged, max 50; `search` matches child or guardian name; `classGroupId`; `link=linked|unlinked`; returns guardians, how many are on the app, last visit, registered by, plus `counts`), `GET …/admin/children/:id` (guardians with member link, last 20 visits with teachers). With `children_church:write`: add a guardian, link or unlink a guardian's member account (`PATCH /children-church/admin/guardians/:id`), remove a guardian, edit notes, and search members (`GET …/admin/members/search?q=`). History accepts `teacherId` (matches who checked in or out).
 - The team can link a guardian to a member account too: `PATCH /children-church/guardians/:id` `{ memberId }`.
 
@@ -8499,12 +8504,20 @@ checked first.
 | PUT    | /children-church/children/mine/:id/away | Guardian of that child | Today's message: who is collecting (`collectorGuardianId`), optional `message` |
 | DELETE | /children-church/children/mine/:id/away | Guardian of that child | Clear today's message |
 | POST   | /children-church/children/mine/:id/notes | Guardian of that child | Reply to today's teacher notes |
+| PUT    | /children-church/children/mine/:id/staying | Guardian of that child | `{ staying }`: staying for all services today (child must be checked in) |
 | GET    | /children-church/roster | WORKER (CC-dept) | Paged children with parents and link status (`search`, `link=linked\|unlinked`, `page`), plus counts |
 | GET    | /children-church/checkin/:id/detail | WORKER (CC-dept) | One visit with family contacts, away message and notes |
 | POST   | /children-church/checkin/:id/notes | WORKER (CC-dept) | Add a note (`kind`, `text`, `shareWithParents`) |
+| PATCH  | /children-church/checkin/:id/staying | WORKER (CC-dept) | `{ staying }`: staying for all services today |
+| GET    | /children-church/duty | WORKER (CC-dept) | Today's room (carried over from last time), every room and who is in it |
+| PUT    | /children-church/duty | WORKER (CC-dept) | `{ classGroupId }` (null = front desk) |
 | PATCH  | /children-church/guardians/:id | WORKER (CC-dept) | Link or unlink a guardian's member account (`memberId`) |
 | GET    | /children-church/lead | Any signed-in member | `{ isLead }`: HOD or deputy of the Children's Church department |
 | GET    | /children-church/dashboard/today | HOD / deputy HOD | Today at a glance (cached 60 s) |
+| GET    | /children-church/setup | HOD / deputy HOD | Age groups with their rooms and counts, plus `toMove` |
+| POST / PATCH / DELETE | /children-church/setup/age-groups[/:id] | HOD / deputy HOD | Add, change or delete an age group (overlaps refused) |
+| POST / PATCH / DELETE | /children-church/setup/rooms[/:id] | HOD / deputy HOD | Add, change or delete a room (delete refused while children are in it) |
+| POST   | /children-church/setup/regroup | HOD / deputy HOD | Move children into the group that fits their age now |
 | GET    | /children-church/admin/children | ADMIN `children_church:read` | Paged children list with guardians, link status, last visit, counts |
 | GET    | /children-church/admin/children/:id | ADMIN `children_church:read` | Child, guardians with member link, last 20 visits with teachers |
 | POST   | /children-church/admin/children/:id/guardians | ADMIN `children_church:write` | Add a guardian |
@@ -10587,8 +10600,9 @@ The central record for a registered child.
 | firstname    | string              |                                          |
 | lastname     | string              |                                          |
 | dateOfBirth  | string (YYYY-MM-DD) \| null | Used for automatic age-group assignment. Either this or `ageRange` is set, never both |
-| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday |
+| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday, or `<min>-<max>m` (months) when registered with one of the church's own age groups (`ageGroupId`) |
 | ageRangeSetOn | string (YYYY-MM-DD) \| null | Day the range was given. For grouping, a range child is placed at the range midpoint on that day and ages from there (`childAgeInMonths` in `child-age.util.ts`) |
+| staysAllServices | boolean | The last "staying for all services today" choice; the next check-in starts with it |
 | ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB or age range |
 | classGroup   | ChildClassGroup     | ManyToOne — auto-assigned from age group |
 | photoUrl     | string \| null      | Optional                                 |
@@ -10638,7 +10652,18 @@ One check-in/check-out record per child per session.
 | checkedInBy      | Member \| null         | ManyToOne, nullable — staff member who performed the check-in |
 | checkedOutBy     | Member \| null         | ManyToOne, nullable — staff member who handed the child back  |
 | lateNotifiedAt   | timestamptz \| null    | Set when guardians were told the child is waiting (once)      |
+| stayingAllServices | boolean              | Staying for every service of the event; the late-pickup reminder waits for the last one |
 | flagReason       | string \| null         | Reason if status = FLAGGED                                    |
+
+### ChildRoomDuty
+
+The room a Children's Church team member is serving in on one church day. Table `child_room_duties`, unique on `(member_id, day)` (also finds a member's last pick), indexed on `(day, class_group_id)` for the dashboard.
+
+| Field      | Type                    | Notes                                              |
+|------------|-------------------------|----------------------------------------------------|
+| member     | Member                  | ManyToOne, CASCADE                                 |
+| classGroup | ChildClassGroup \| null | ManyToOne, CASCADE; null means the front desk      |
+| day        | date                    | Church-local day                                   |
 
 ### ChildCheckInNote
 
@@ -13330,8 +13355,9 @@ The central record for a registered child.
 | firstname    | string              |                                          |
 | lastname     | string              |                                          |
 | dateOfBirth  | string (YYYY-MM-DD) \| null | Used for automatic age-group assignment. Either this or `ageRange` is set, never both |
-| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday |
+| ageRange     | string \| null      | One of `0-3`, `4-5`, `6-8`, `9-12`, `13-15`, `16-19` (years), for parents who'd rather not give a birthday, or `<min>-<max>m` (months) when registered with one of the church's own age groups (`ageGroupId`) |
 | ageRangeSetOn | string (YYYY-MM-DD) \| null | Day the range was given. For grouping, a range child is placed at the range midpoint on that day and ages from there (`childAgeInMonths` in `child-age.util.ts`) |
+| staysAllServices | boolean | The last "staying for all services today" choice; the next check-in starts with it |
 | ageGroup     | ChildAgeGroup       | ManyToOne — auto-assigned from DOB or age range |
 | classGroup   | ChildClassGroup     | ManyToOne — auto-assigned from age group |
 | photoUrl     | string \| null      | Optional                                 |
@@ -13381,7 +13407,18 @@ One check-in/check-out record per child per session.
 | checkedInBy      | Member \| null         | ManyToOne, nullable — staff member who performed the check-in |
 | checkedOutBy     | Member \| null         | ManyToOne, nullable — staff member who handed the child back  |
 | lateNotifiedAt   | timestamptz \| null    | Set when guardians were told the child is waiting (once)      |
+| stayingAllServices | boolean              | Staying for every service of the event; the late-pickup reminder waits for the last one |
 | flagReason       | string \| null         | Reason if status = FLAGGED                                    |
+
+### ChildRoomDuty
+
+The room a Children's Church team member is serving in on one church day. Table `child_room_duties`, unique on `(member_id, day)` (also finds a member's last pick), indexed on `(day, class_group_id)` for the dashboard.
+
+| Field      | Type                    | Notes                                              |
+|------------|-------------------------|----------------------------------------------------|
+| member     | Member                  | ManyToOne, CASCADE                                 |
+| classGroup | ChildClassGroup \| null | ManyToOne, CASCADE; null means the front desk      |
+| day        | date                    | Church-local day                                   |
 
 ### ChildCheckInNote
 
@@ -21160,10 +21197,13 @@ Provides a security-grade check-in/check-out system for children. Key features:
 - **My Children** (`GET /children-church/children/mine`) lists children the caller is a guardian of, each with `inClassNow` and `lastVisit` (one extra grouped query on `child_check_ins` by `child_id`). A child can have several guardians; every one linked to a member account sees the child.
 - **Parent view** (`GET /children-church/children/mine/:id`, guardian only, else 404) returns the child, guardians (name, relationship, `isAuthorizedPickup`, `isMe` — no contact details), today's visit (church-local day; `receivedBy`/`handedBackBy` teacher names; `pickupCode` only for a guardian who can collect and only while `CHECKED_IN`), today's notes shared with parents (opening marks unseen teacher notes `parentSeenAt`/`parentSeenBy`), and today's away message.
 - Parents can edit date of birth, special notes (array, stored one per line; changes set `notesUpdatedBy`/`notesUpdatedAt` so the team sees "Updated by parent"), emergency contact and doctor (`PATCH /children-church/children/mine/:id`), upload a photo (`POST …/photo`, multipart `file`, images up to 5 MB, Cloudinary `child-photos`), set or clear today's away message naming a guardian who can collect (`PUT`/`DELETE …/away`; it counts only on `awayDate`, so it clears itself), and reply to today's notes (`POST …/notes`; needs a check-in today; pushes `CHILD_NOTE_REPLY` to the teacher who checked the child in and every teacher who wrote a note on that visit).
-- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit, family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
+- **Teacher notes** (`ChildCheckInNote`): `GET /children-church/checkin/:id/detail` (team) returns the visit (with `stayingAllServices`), family contacts, guardians, away message and notes; `POST /children-church/checkin/:id/notes` adds `FEEDBACK` / `MEAL` / `INCIDENT` / `TEAM_ONLY`. `TEAM_ONLY` is never shared; the others are shared unless `shareWithParents: false`, and sharing pushes `CHILD_NOTE_SHARED` to every guardian on the app.
 - **Who handled the child**: `checkedInBy` was already saved; check-out now saves `checkedOutBy`. Both show on visits for the team, admins and parents (names only).
 - **Late pickup**: checking a child into a service slot schedules one Bull delayed job per slot (`children-church-late` queue, `jobId cc-late:<tenantId>:<slotId>`, so later check-ins add nothing) for 20 minutes after the slot's `endTime`. It marks still-checked-in visits `lateNotifiedAt` and pushes `CHILD_LATE_PICKUP` to their guardians who can collect. No scanning.
-- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (distinct `checkedInBy` today), collected, rooms (children in now, teachers who checked children into that class today, `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), late pickups, flagged visits, today's parent note changes, away messages, this month's Sundays (children per Sunday), new children and children not seen for 3+ weeks (last visit 21–90 days ago). Also: `service.live` / `service.next` (the service slot running now, else the next within 14 days; indexed on start/end time), `lastDay` (the last service day before today: children, distinct teachers, last collection time), `plan` per room (usual children from that day and `teachersNeeded` from `childrenPerTeacher`), `teachersToPlan`, `unlinkedChildren` (no guardian linked to the app), room `capacity` and `teacherInitials`. Last-day and plan numbers come from two grouped queries over the last 35 days on the indexed `checkin_time`. Cached in Redis for 60 s per church-day.
+- **Staying for all services** (2026-11-17): `ChildCheckIn.stayingAllServices`. Check-in takes `stayingAllServices`; left out, it uses `ChildProfile.staysAllServices` (the child's last choice), and a different choice is saved back to the profile. The team can change it on a visit (`PATCH /children-church/checkin/:id/staying` `{ staying }`), and so can any guardian of the child while it is checked in today (`PUT /children-church/children/mine/:id/staying`). When on, the late-pickup job is also booked for the event's last slot (same fixed jobId pattern). A slot's job reminds only children in that slot who aren't staying; the event's last slot also reminds children staying from any of its slots. `today.stayingAllServices` is on the parent view and `staysAllServices` on roster rows.
+- **Room for today** (2026-11-17): `GET /children-church/duty` (team) returns `duty` (`classGroupId`, `roomName`, `frontDesk`, `remembered`), every room with its age group's months and the first names of teammates in it today, and `atFrontDesk`. The first time `duty` is null and the app asks once; after that the last pick is copied to today (one upsert) and shown as remembered. `PUT /children-church/duty` `{ classGroupId }` (null = front desk) changes it. Both clear the dashboard cache for the day.
+- **Groups & rooms for the HOD** (2026-11-17): `GET /children-church/setup` (HOD / deputy only) returns age groups (months, children) with their rooms (places, children per teacher, children) from one grouped count, plus `toMove`: children whose age now puts them in a different group. `POST|PATCH|DELETE /children-church/setup/age-groups[/:id]`, `POST|PATCH|DELETE /children-church/setup/rooms[/:id]` and `POST /children-church/setup/regroup` reuse the admin rules: deleting a group or room is refused while children are in it, and overlapping ages are refused (admin and HOD alike) with "These ages overlap with …". Registering can take `ageGroupId` instead of a date of birth or fixed range; it is stored as that group's month range.
+- **HOD dashboard** (`GET /children-church/dashboard/today`, `GET /children-church/lead` → `{ isLead }`): only for the HOD / deputy HOD (`DepartmentLead`) of a department holding `MANAGE_CHILDREN_CHURCH`. Children in now, teachers on duty (Children's Church workers with worker attendance today, plus anyone who checked a child in, plus room picks; one indexed query on `attendances.checkin_time`), collected, rooms (children in now, teachers who picked that room today and are present (a carried-over pick alone doesn't count unless the church records no worker attendance that day), `needsTeacher` when children exceed teachers × `ChildClassGroup.childrenPerTeacher`), `atFrontDesk` (first names), late pickups, flagged visits, today's parent note changes, away messages, this month's Sundays (children per Sunday), new children and children not seen for 3+ weeks (last visit 21–90 days ago). Also: `service.live` / `service.next` (the service slot running now, else the next within 14 days; indexed on start/end time), `lastDay` (the last service day before today: children, distinct teachers, last collection time), `plan` per room (usual children from that day and `teachersNeeded` from `childrenPerTeacher`), `teachersToPlan`, `unlinkedChildren` (no guardian linked to the app), room `capacity` and `teacherInitials`. Last-day and plan numbers come from two grouped queries over the last 35 days on the indexed `checkin_time`. Cached in Redis for 60 s per church-day.
 - **Admin**: `GET /children-church/admin/children` (paged, max 50; `search` matches child or guardian name; `classGroupId`; `link=linked|unlinked`; returns guardians, how many are on the app, last visit, registered by, plus `counts`), `GET …/admin/children/:id` (guardians with member link, last 20 visits with teachers). With `children_church:write`: add a guardian, link or unlink a guardian's member account (`PATCH /children-church/admin/guardians/:id`), remove a guardian, edit notes, and search members (`GET …/admin/members/search?q=`). History accepts `teacherId` (matches who checked in or out).
 - The team can link a guardian to a member account too: `PATCH /children-church/guardians/:id` `{ memberId }`.
 
@@ -22657,12 +22697,20 @@ outside the requested `?months=` window).
 | PUT    | /children-church/children/mine/:id/away | Guardian of that child | Today's message: who is collecting (`collectorGuardianId`), optional `message` |
 | DELETE | /children-church/children/mine/:id/away | Guardian of that child | Clear today's message |
 | POST   | /children-church/children/mine/:id/notes | Guardian of that child | Reply to today's teacher notes |
+| PUT    | /children-church/children/mine/:id/staying | Guardian of that child | `{ staying }`: staying for all services today (child must be checked in) |
 | GET    | /children-church/roster | WORKER (CC-dept) | Paged children with parents and link status (`search`, `link=linked\|unlinked`, `page`), plus counts |
 | GET    | /children-church/checkin/:id/detail | WORKER (CC-dept) | One visit with family contacts, away message and notes |
 | POST   | /children-church/checkin/:id/notes | WORKER (CC-dept) | Add a note (`kind`, `text`, `shareWithParents`) |
+| PATCH  | /children-church/checkin/:id/staying | WORKER (CC-dept) | `{ staying }`: staying for all services today |
+| GET    | /children-church/duty | WORKER (CC-dept) | Today's room (carried over from last time), every room and who is in it |
+| PUT    | /children-church/duty | WORKER (CC-dept) | `{ classGroupId }` (null = front desk) |
 | PATCH  | /children-church/guardians/:id | WORKER (CC-dept) | Link or unlink a guardian's member account (`memberId`) |
 | GET    | /children-church/lead | Any signed-in member | `{ isLead }`: HOD or deputy of the Children's Church department |
 | GET    | /children-church/dashboard/today | HOD / deputy HOD | Today at a glance (cached 60 s) |
+| GET    | /children-church/setup | HOD / deputy HOD | Age groups with their rooms and counts, plus `toMove` |
+| POST / PATCH / DELETE | /children-church/setup/age-groups[/:id] | HOD / deputy HOD | Add, change or delete an age group (overlaps refused) |
+| POST / PATCH / DELETE | /children-church/setup/rooms[/:id] | HOD / deputy HOD | Add, change or delete a room (delete refused while children are in it) |
+| POST   | /children-church/setup/regroup | HOD / deputy HOD | Move children into the group that fits their age now |
 | GET    | /children-church/admin/children | ADMIN `children_church:read` | Paged children list with guardians, link status, last visit, counts |
 | GET    | /children-church/admin/children/:id | ADMIN `children_church:read` | Child, guardians with member link, last 20 visits with teachers |
 | POST   | /children-church/admin/children/:id/guardians | ADMIN `children_church:write` | Add a guardian |

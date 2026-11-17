@@ -25,4 +25,13 @@ describe('childAgeInMonths', () => {
   it('returns null when there is no age at all', () => {
     expect(childAgeInMonths({}, today)).toBeNull();
   });
+
+  it('places a child in the middle of a church age group given in months', () => {
+    expect(
+      childAgeInMonths(
+        { ageRange: '18-35m', ageRangeSetOn: '2026-11-16' },
+        today,
+      ),
+    ).toBe(26);
+  });
 });

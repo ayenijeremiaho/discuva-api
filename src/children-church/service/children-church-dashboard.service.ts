@@ -5,6 +5,7 @@ import { fromZonedTime } from 'date-fns-tz';
 import { ChildCheckIn } from '../entity/child-check-in.entity';
 import { ChildClassGroup } from '../entity/child-class-group.entity';
 import { ChildProfile } from '../entity/child-profile.entity';
+import { ChildRoomDuty } from '../entity/child-room-duty.entity';
 import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
@@ -30,8 +31,13 @@ interface TodayRow {
   classGroupId: string | null;
   classGroupName: string | null;
   checkinTime: Date;
-  teacherFirstname: string | null;
-  teacherLastname: string | null;
+}
+
+interface DutyRow {
+  memberId: string;
+  classGroupId: string | null;
+  firstname: string | null;
+  lastname: string | null;
 }
 
 interface DayRow {
@@ -56,6 +62,8 @@ export class ChildrenChurchDashboardService {
     private readonly leadRepo: Repository<DepartmentLead>,
     @InjectRepository(ServiceSlot)
     private readonly slotRepo: Repository<ServiceSlot>,
+    @InjectRepository(ChildRoomDuty)
+    private readonly dutyRepo: Repository<ChildRoomDuty>,
     private readonly tz: ChurchTimezoneService,
     private readonly cache: CacheService,
   ) {}
@@ -111,17 +119,16 @@ export class ChildrenChurchDashboardService {
       slots,
       unlinked,
       dayTeachers,
+      duties,
+      present,
     ] = await Promise.all([
       this.checkInRepo
         .createQueryBuilder('ci')
         .innerJoin('ci.child', 'c')
         .leftJoin('c.classGroup', 'cg')
-        .leftJoin('ci.checkedInBy', 't')
         .select('ci.id', 'id')
         .addSelect('ci.status', 'status')
         .addSelect('ci.checked_in_by_id', 'checkedInById')
-        .addSelect('t.firstname', 'teacherFirstname')
-        .addSelect('t.lastname', 'teacherLastname')
         .addSelect('ci.late_notified_at', 'lateNotifiedAt')
         .addSelect('ci.flag_reason', 'flagReason')
         .addSelect('ci.checkin_time', 'checkinTime')
@@ -213,14 +220,44 @@ export class ChildrenChurchDashboardService {
         .setParameter('tz', timezone)
         .groupBy('d')
         .getRawMany<{ d: string | Date; teachers: number }>(),
+      this.dutyRepo
+        .createQueryBuilder('rd')
+        .innerJoin('rd.member', 'm')
+        .select('rd.member_id', 'memberId')
+        .addSelect('rd.class_group_id', 'classGroupId')
+        .addSelect('m.firstname', 'firstname')
+        .addSelect('m.lastname', 'lastname')
+        .where('rd.day = :ymd', { ymd: day.ymd })
+        .getRawMany<DutyRow>(),
+      // Children's Church workers who checked in to a service today.
+      this.checkInRepo.query(
+        `SELECT DISTINCT a.member_id AS "memberId" FROM attendances a
+         JOIN worker_profiles wp ON wp.member_id = a.member_id
+         LEFT JOIN departments d ON d.id = wp.department_id
+         LEFT JOIN departments sd ON sd.id = wp.secondary_department_id
+         WHERE a.checkin_time >= $1 AND a.checkin_time < $2
+           AND ($3 = ANY(d.capabilities) OR $3 = ANY(sd.capabilities))`,
+        [day.start, day.end, DepartmentCapability.MANAGE_CHILDREN_CHURCH],
+      ) as Promise<{ memberId: string }[]>,
     ]);
 
     const inNow = rows.filter(
       (r) => r.status === ChildCheckInStatusEnum.CHECKED_IN,
     );
-    const teachers = new Set(rows.map((r) => r.checkedInById).filter(Boolean));
-    const initials = (r: TodayRow) =>
-      `${r.teacherFirstname?.[0] ?? ''}${r.teacherLastname?.[0] ?? ''}`.toUpperCase();
+    // On duty: checked in to the service as a worker, or checked a child in. A room pick alone
+    // doesn't count (it carries over from last week), unless the church doesn't record worker attendance.
+    const teachers = new Set<string>([
+      ...present.map((p) => p.memberId),
+      ...rows.map((r) => r.checkedInById).filter((id): id is string => !!id),
+    ]);
+    const onDuty = duties.filter(
+      (d) => !present.length || teachers.has(d.memberId),
+    );
+    for (const d of onDuty) teachers.add(d.memberId);
+    const initials = (r: {
+      firstname: string | null;
+      lastname: string | null;
+    }) => `${r.firstname?.[0] ?? ''}${r.lastname?.[0] ?? ''}`.toUpperCase();
 
     // Days rolled up across rooms; the last one before today is "last Sunday" (or last service day).
     const ymdOf = (d: string | Date) =>
@@ -261,13 +298,7 @@ export class ChildrenChurchDashboardService {
         const kids = here.filter(
           (r) => r.status === ChildCheckInStatusEnum.CHECKED_IN,
         ).length;
-        const teacherRows = [
-          ...new Map(
-            here
-              .filter((r) => r.checkedInById)
-              .map((r) => [r.checkedInById, r]),
-          ).values(),
-        ];
+        const teacherRows = onDuty.filter((d) => d.classGroupId === cg.id);
         const ratio = cg.childrenPerTeacher;
         const needed = ratio ? Math.ceil(kids / ratio) : null;
         return {
@@ -319,6 +350,9 @@ export class ChildrenChurchDashboardService {
       childrenInNow: inNow.length,
       checkedInToday: rows.length,
       teachersOnDuty: teachers.size,
+      atFrontDesk: onDuty
+        .filter((d) => !d.classGroupId)
+        .map((d) => `${d.firstname ?? ''}`.trim()),
       collected: rows.filter(
         (r) => r.status === ChildCheckInStatusEnum.CHECKED_OUT,
       ).length,

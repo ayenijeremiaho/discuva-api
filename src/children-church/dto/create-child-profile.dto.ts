@@ -24,13 +24,18 @@ export class CreateChildProfileDto {
   @IsNotEmpty()
   lastname: string;
 
-  @ValidateIf((o: CreateChildProfileDto) => !o.ageRange)
+  @ValidateIf((o: CreateChildProfileDto) => !o.ageRange && !o.ageGroupId)
   @IsDateString({}, { message: 'Give a date of birth or an age range' })
   dateOfBirth?: string;
 
-  @ValidateIf((o: CreateChildProfileDto) => !o.dateOfBirth)
+  @ValidateIf((o: CreateChildProfileDto) => !o.dateOfBirth && !o.ageGroupId)
   @IsIn(CHILD_AGE_RANGES, { message: 'Give a date of birth or an age range' })
   ageRange?: string;
+
+  // One of the church's own age groups, instead of a date of birth.
+  @IsUUID('4')
+  @IsOptional()
+  ageGroupId?: string;
 
   @IsUrl({}, { message: 'photoUrl must be a valid URL' })
   @IsOptional()
@@ -70,6 +75,10 @@ export class UpdateChildProfileDto {
   @IsIn(CHILD_AGE_RANGES)
   @IsOptional()
   ageRange?: string;
+
+  @IsUUID('4')
+  @IsOptional()
+  ageGroupId?: string;
 
   @IsUrl({}, { message: 'photoUrl must be a valid URL' })
   @IsOptional()

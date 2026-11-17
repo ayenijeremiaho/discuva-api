@@ -69,6 +69,10 @@ export class ChildCheckIn extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   lateNotifiedAt: Date | null;
 
+  // Late-pickup reminders wait for the last service of the day instead of this one.
+  @Column({ default: false })
+  stayingAllServices: boolean;
+
   @Column({ nullable: true, type: 'text' })
   flagReason: string | null;
 }

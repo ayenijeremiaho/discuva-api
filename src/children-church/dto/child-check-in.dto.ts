@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class ChildCheckInDto {
   @IsUUID('4')
@@ -15,4 +15,14 @@ export class ChildCheckInDto {
   @IsString()
   @IsOptional()
   droppedOffByName?: string;
+
+  // Left out, the child's choice from last time is used.
+  @IsBoolean()
+  @IsOptional()
+  stayingAllServices?: boolean;
+}
+
+export class SetStayingDto {
+  @IsBoolean()
+  staying: boolean;
 }

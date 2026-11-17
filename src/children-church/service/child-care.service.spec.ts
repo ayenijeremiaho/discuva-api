@@ -64,6 +64,9 @@ function setup() {
     computeAgeGroup: jest
       .fn()
       .mockResolvedValue({ ageGroup: null, classGroup: null }),
+    setStaying: jest.fn((id, staying) =>
+      Promise.resolve({ id, stayingAllServices: staying }),
+    ),
   };
   const push: any = {
     dispatchToMemberIds: jest.fn().mockResolvedValue(undefined),
@@ -82,7 +85,15 @@ function setup() {
     } as any,
     push,
   );
-  return { service, childRepo, guardianRepo, checkInRepo, noteRepo, push };
+  return {
+    service,
+    childRepo,
+    guardianRepo,
+    checkInRepo,
+    noteRepo,
+    push,
+    children,
+  };
 }
 
 const parent = { id: 'p1' } as any;
@@ -326,5 +337,40 @@ describe('ChildCareService', () => {
         buffer: Buffer.from(''),
       } as any),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  describe('staying for every service', () => {
+    it("a guardian can switch it on for today's check-in", async () => {
+      const { service, guardianRepo, checkInRepo, children } = setup();
+      guardianRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        isAuthorizedPickup: false,
+      });
+      checkInRepo.findOne.mockResolvedValue({ id: 'ci-1' });
+      expect(await service.setStaying(parent, 'c1', true)).toEqual({
+        id: 'ci-1',
+        stayingAllServices: true,
+      });
+      expect(children.setStaying).toHaveBeenCalledWith('ci-1', true);
+    });
+
+    it('needs the child to be checked in today', async () => {
+      const { service, guardianRepo, checkInRepo } = setup();
+      guardianRepo.findOne.mockResolvedValue({
+        id: 'g1',
+        isAuthorizedPickup: true,
+      });
+      checkInRepo.findOne.mockResolvedValue(null);
+      await expect(service.setStaying(parent, 'c1', true)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it("isn't open to people who aren't the child's guardian", async () => {
+      const { service, guardianRepo, children } = setup();
+      guardianRepo.findOne.mockResolvedValue(null);
+      await expect(service.setStaying(parent, 'c1', true)).rejects.toThrow();
+      expect(children.setStaying).not.toHaveBeenCalled();
+    });
   });
 });
