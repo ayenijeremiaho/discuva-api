@@ -7,6 +7,7 @@ import { ChildClassGroup } from '../entity/child-class-group.entity';
 import { ChildProfile } from '../entity/child-profile.entity';
 import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
+import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
@@ -29,6 +30,16 @@ interface TodayRow {
   classGroupId: string | null;
   classGroupName: string | null;
   checkinTime: Date;
+  teacherFirstname: string | null;
+  teacherLastname: string | null;
+}
+
+interface DayRow {
+  d: string | Date;
+  classGroupId: string | null;
+  children: number;
+  teachers: number;
+  lastOut: Date | null;
 }
 
 // Today at a glance for the HOD and deputy of the department that runs Children's Church.
@@ -43,6 +54,8 @@ export class ChildrenChurchDashboardService {
     private readonly childRepo: Repository<ChildProfile>,
     @InjectRepository(DepartmentLead)
     private readonly leadRepo: Repository<DepartmentLead>,
+    @InjectRepository(ServiceSlot)
+    private readonly slotRepo: Repository<ServiceSlot>,
     private readonly tz: ChurchTimezoneService,
     private readonly cache: CacheService,
   ) {}
@@ -84,24 +97,31 @@ export class ChildrenChurchDashboardService {
       `${day.ymd.slice(0, 7)}-01T00:00:00`,
       timezone,
     );
-    const now = Date.now();
+    const now = new Date();
+    const localDate = `(ci.checkin_time AT TIME ZONE :tz)::date`;
 
     const [
       rows,
       classGroups,
       parentUpdates,
       awayCount,
-      sundays,
+      days,
       newChildren,
       missed,
+      slots,
+      unlinked,
+      dayTeachers,
     ] = await Promise.all([
       this.checkInRepo
         .createQueryBuilder('ci')
         .innerJoin('ci.child', 'c')
         .leftJoin('c.classGroup', 'cg')
+        .leftJoin('ci.checkedInBy', 't')
         .select('ci.id', 'id')
         .addSelect('ci.status', 'status')
         .addSelect('ci.checked_in_by_id', 'checkedInById')
+        .addSelect('t.firstname', 'teacherFirstname')
+        .addSelect('t.lastname', 'teacherLastname')
         .addSelect('ci.late_notified_at', 'lateNotifiedAt')
         .addSelect('ci.flag_reason', 'flagReason')
         .addSelect('ci.checkin_time', 'checkinTime')
@@ -112,7 +132,12 @@ export class ChildrenChurchDashboardService {
         .where('ci.checkin_time >= :start AND ci.checkin_time < :end', day)
         .getRawMany<TodayRow>(),
       this.classGroupRepo.find({
-        select: { id: true, name: true, childrenPerTeacher: true },
+        select: {
+          id: true,
+          name: true,
+          capacity: true,
+          childrenPerTeacher: true,
+        },
         order: { name: 'ASC' },
       }),
       this.childRepo
@@ -127,18 +152,27 @@ export class ChildrenChurchDashboardService {
         ])
         .addSelect(['m.id', 'm.firstname', 'm.lastname'])
         .where('c.notes_updated_at >= :start', day)
-        .orderBy('c.notes_updated_at', 'DESC')
+        .orderBy('c.notesUpdatedAt', 'DESC')
         .limit(5)
         .getMany(),
       this.childRepo.count({ where: { awayDate: day.ymd } }),
+      // Each church day of the last five weeks, per room, for last Sunday, the plan and this month.
       this.checkInRepo
         .createQueryBuilder('ci')
-        .select(`(ci.checkin_time AT TIME ZONE :tz)::date`, 'd')
-        .addSelect('COUNT(*)::int', 'n')
-        .where('ci.checkin_time >= :monthStart', { monthStart })
+        .innerJoin('ci.child', 'c')
+        .select(localDate, 'd')
+        .addSelect('c.class_group_id', 'classGroupId')
+        .addSelect('COUNT(*)::int', 'children')
+        .addSelect('COUNT(DISTINCT ci.checked_in_by_id)::int', 'teachers')
+        .addSelect('MAX(ci.checkout_time)', 'lastOut')
+        .where('ci.checkin_time >= :from AND ci.checkin_time < :start', {
+          from: new Date(day.start.getTime() - 35 * DAY_MS),
+          start: day.start,
+        })
         .setParameter('tz', timezone)
         .groupBy('d')
-        .getRawMany<{ d: string | Date; n: number }>(),
+        .addGroupBy('c.class_group_id')
+        .getRawMany<DayRow>(),
       this.childRepo
         .createQueryBuilder('c')
         .where('c.created_at >= :monthStart', { monthStart })
@@ -149,16 +183,77 @@ export class ChildrenChurchDashboardService {
              WHERE checkin_time >= $1 GROUP BY child_id
            ) t WHERE t.last < $2`,
         [
-          new Date(now - MISSED_WINDOW_DAYS * DAY_MS),
-          new Date(now - MISSED_DAYS * DAY_MS),
+          new Date(now.getTime() - MISSED_WINDOW_DAYS * DAY_MS),
+          new Date(now.getTime() - MISSED_DAYS * DAY_MS),
         ],
       ) as Promise<{ n: number }[]>,
+      // The slot running now, else the next one within two weeks.
+      this.slotRepo
+        .createQueryBuilder('s')
+        .select(['s.id', 's.name', 's.startTime', 's.endTime'])
+        .where('s.end_time >= :now AND s.start_time <= :until', {
+          now,
+          until: new Date(now.getTime() + 14 * DAY_MS),
+        })
+        .orderBy('s.startTime', 'ASC')
+        .limit(2)
+        .getMany(),
+      this.childRepo.query(
+        `SELECT COUNT(*)::int AS n FROM child_profiles c
+         WHERE NOT EXISTS (SELECT 1 FROM child_guardians g WHERE g.child_id = c.id AND g.member_id IS NOT NULL)`,
+      ) as Promise<{ n: number }[]>,
+      this.checkInRepo
+        .createQueryBuilder('ci')
+        .select(localDate, 'd')
+        .addSelect('COUNT(DISTINCT ci.checked_in_by_id)::int', 'teachers')
+        .where('ci.checkin_time >= :from AND ci.checkin_time < :start', {
+          from: new Date(day.start.getTime() - 35 * DAY_MS),
+          start: day.start,
+        })
+        .setParameter('tz', timezone)
+        .groupBy('d')
+        .getRawMany<{ d: string | Date; teachers: number }>(),
     ]);
 
     const inNow = rows.filter(
       (r) => r.status === ChildCheckInStatusEnum.CHECKED_IN,
     );
     const teachers = new Set(rows.map((r) => r.checkedInById).filter(Boolean));
+    const initials = (r: TodayRow) =>
+      `${r.teacherFirstname?.[0] ?? ''}${r.teacherLastname?.[0] ?? ''}`.toUpperCase();
+
+    // Days rolled up across rooms; the last one before today is "last Sunday" (or last service day).
+    const ymdOf = (d: string | Date) =>
+      typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
+    const byDay = new Map<
+      string,
+      { children: number; teachers: number; lastOut: Date | null }
+    >();
+    for (const r of days) {
+      const k = ymdOf(r.d);
+      const cur = byDay.get(k) ?? { children: 0, teachers: 0, lastOut: null };
+      cur.children += Number(r.children);
+      if (r.lastOut && (!cur.lastOut || new Date(r.lastOut) > cur.lastOut))
+        cur.lastOut = new Date(r.lastOut);
+      byDay.set(k, cur);
+    }
+    for (const t of dayTeachers) {
+      const cur = byDay.get(ymdOf(t.d));
+      if (cur) cur.teachers = Number(t.teachers);
+    }
+    const lastDayKey = [...byDay.keys()].sort().pop() ?? null;
+    const lastDay = lastDayKey
+      ? { date: lastDayKey, ...byDay.get(lastDayKey)! }
+      : null;
+    const isSunday = (ymd: string) =>
+      new Date(`${ymd}T12:00:00Z`).getUTCDay() === 0;
+    const monthKey = day.ymd.slice(0, 7);
+    const sundays = [...byDay.entries()]
+      .filter(([d]) => d.startsWith(monthKey) && isSunday(d))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, v]) => ({ date, children: v.children }));
+    if (isSunday(day.ymd) && rows.length)
+      sundays.push({ date: day.ymd, children: rows.length });
 
     const rooms = classGroups
       .map((cg) => {
@@ -166,31 +261,63 @@ export class ChildrenChurchDashboardService {
         const kids = here.filter(
           (r) => r.status === ChildCheckInStatusEnum.CHECKED_IN,
         ).length;
-        const roomTeachers = new Set(
-          here.map((r) => r.checkedInById).filter(Boolean),
-        ).size;
+        const teacherRows = [
+          ...new Map(
+            here
+              .filter((r) => r.checkedInById)
+              .map((r) => [r.checkedInById, r]),
+          ).values(),
+        ];
         const ratio = cg.childrenPerTeacher;
+        const needed = ratio ? Math.ceil(kids / ratio) : null;
         return {
           id: cg.id,
           name: cg.name,
           children: kids,
-          teachers: roomTeachers,
+          capacity: cg.capacity,
+          teachers: teacherRows.length,
+          teacherInitials: teacherRows.map(initials).filter(Boolean),
           childrenPerTeacher: ratio,
-          needsTeacher: !!ratio && kids > roomTeachers * ratio,
+          teachersNeeded: needed,
+          needsTeacher:
+            needed !== null && kids > 0 && teacherRows.length < needed,
         };
       })
       .filter((r) => r.children > 0 || r.teachers > 0);
 
-    const sundayCounts = sundays
-      .filter(
-        (s) =>
-          new Date(`${String(s.d).slice(0, 10)}T12:00:00Z`).getUTCDay() === 0,
-      )
-      .map((s) => Number(s.n));
+    const plan = lastDayKey
+      ? classGroups
+          .map((cg) => {
+            const usual = days
+              .filter(
+                (r) => ymdOf(r.d) === lastDayKey && r.classGroupId === cg.id,
+              )
+              .reduce((n, r) => n + Number(r.children), 0);
+            return {
+              id: cg.id,
+              name: cg.name,
+              usualChildren: usual,
+              childrenPerTeacher: cg.childrenPerTeacher,
+              teachersNeeded:
+                cg.childrenPerTeacher && usual
+                  ? Math.ceil(usual / cg.childrenPerTeacher)
+                  : null,
+            };
+          })
+          .filter((p) => p.usualChildren > 0)
+      : [];
+
+    const live = slots.find((s) => new Date(s.startTime) <= now) ?? null;
+    const next = slots.find((s) => new Date(s.startTime) > now) ?? null;
 
     return {
       date: day.ymd,
+      service: {
+        live: live ? { name: live.name, endTime: live.endTime } : null,
+        next: next ? { name: next.name, startTime: next.startTime } : null,
+      },
       childrenInNow: inNow.length,
+      checkedInToday: rows.length,
       teachersOnDuty: teachers.size,
       collected: rows.filter(
         (r) => r.status === ChildCheckInStatusEnum.CHECKED_OUT,
@@ -222,10 +349,15 @@ export class ChildrenChurchDashboardService {
         at: c.notesUpdatedAt,
       })),
       awayToday: awayCount,
+      lastDay,
+      plan,
+      teachersToPlan: plan.reduce((n, p) => n + (p.teachersNeeded ?? 0), 0),
+      unlinkedChildren: unlinked[0]?.n ?? 0,
       month: {
-        averageSunday: sundayCounts.length
+        sundays,
+        averageSunday: sundays.length
           ? Math.round(
-              sundayCounts.reduce((a, b) => a + b, 0) / sundayCounts.length,
+              sundays.reduce((a, b) => a + b.children, 0) / sundays.length,
             )
           : 0,
         newChildren,
